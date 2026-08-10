@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Filter, X, Columns, Calendar, MapPin, User, RotateCcw, ChevronDown, Check, Tag } from 'lucide-react';
+import { Search, Filter, X, Columns, Calendar, MapPin, User, RotateCcw, ChevronDown, Check, Tag, Globe } from 'lucide-react';
 import { ShopeeOrder, ColumnDefinition, DatePreset } from '../types';
 import { CustomDropdown, OptionItem } from './CustomDropdown';
 import { CustomDatePicker } from './CustomDatePicker';
@@ -12,6 +12,8 @@ interface StatusFilterTabsProps {
   onSearchChange: (query: string) => void;
   selectedCategories: string[];
   onSelectCategories: (categories: string[]) => void;
+  selectedCountries?: string[];
+  onSelectCountries?: (countries: string[]) => void;
   selectedStates?: string[];
   onSelectStates?: (states: string[]) => void;
   selectedRaces?: string[];
@@ -37,6 +39,8 @@ export const StatusFilterTabs: React.FC<StatusFilterTabsProps> = ({
   onSearchChange,
   selectedCategories,
   onSelectCategories,
+  selectedCountries,
+  onSelectCountries,
   selectedStates = ['All'],
   onSelectStates,
   selectedRaces = ['All'],
@@ -93,26 +97,17 @@ export const StatusFilterTabs: React.FC<StatusFilterTabsProps> = ({
     { value: 'Valorant', label: 'Valorant' },
   ];
 
-  // State Location Options
-  const stateOptions: OptionItem[] = [
+  // Country Location Options
+  const countryOptions: OptionItem[] = [
     'All',
-    'Kuala Lumpur',
-    'Selangor',
-    'Johor',
-    'Pulau Pinang',
-    'Perak',
-    'Kedah',
-    'Melaka',
-    'Negeri Sembilan',
-    'Pahang',
-    'Kelantan',
-    'Terengganu',
-    'Sabah',
-    'Sarawak',
-    'Perlis',
-    'Labuan',
-    'Putrajaya',
-  ].map((st) => ({ value: st, label: st === 'All' ? 'All States' : st }));
+    'Malaysia',
+    'Singapore',
+    'China',
+    'Indonesia',
+  ].map((st) => ({ value: st, label: st === 'All' ? 'All Countries' : st }));
+
+  const activeCountryValues = selectedCountries || selectedStates;
+  const activeCountryHandler = onSelectCountries || onSelectStates;
 
   // Ethnicity Options
   const raceOptions: OptionItem[] = ['All', 'Malay', 'Chinese', 'Indian', 'Other'].map((r) => ({
@@ -123,7 +118,7 @@ export const StatusFilterTabs: React.FC<StatusFilterTabsProps> = ({
   const isAnyFilterActive =
     (selectedStatuses.length > 0 && !selectedStatuses.includes('All')) ||
     (selectedCategories.length > 0 && !selectedCategories.includes('All')) ||
-    (selectedStates.length > 0 && !selectedStates.includes('All')) ||
+    (activeCountryValues.length > 0 && !activeCountryValues.includes('All')) ||
     (selectedRaces.length > 0 && !selectedRaces.includes('All')) ||
     searchQuery.trim() !== '' ||
     datePreset !== 'all' ||
@@ -174,15 +169,15 @@ export const StatusFilterTabs: React.FC<StatusFilterTabsProps> = ({
           onMultiChange={onSelectCategories}
         />
 
-        {/* Multi-Select State Location Dropdown */}
-        {onSelectStates && (
+        {/* Multi-Select Country Location Dropdown */}
+        {activeCountryHandler && (
           <CustomDropdown
-            label="State"
-            icon={<MapPin className="w-3.5 h-3.5 text-blue-600" />}
-            options={stateOptions}
+            label="Country"
+            icon={<Globe className="w-3.5 h-3.5 text-blue-600" />}
+            options={countryOptions}
             isMulti={true}
-            selectedValues={selectedStates}
-            onMultiChange={onSelectStates}
+            selectedValues={activeCountryValues}
+            onMultiChange={activeCountryHandler}
           />
         )}
 

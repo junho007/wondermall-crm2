@@ -387,11 +387,8 @@ export const SalesChartModal: React.FC<SalesChartModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className={`p-2 rounded-full border transition-all cursor-pointer active:scale-95 ${
-              isLight
-                ? 'bg-white border-zinc-300 text-slate-700 hover:bg-slate-100'
-                : 'bg-[#222222] border-zinc-700 text-zinc-300 hover:bg-[#333333]'
-            }`}
+            className="p-2 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 transition-colors cursor-pointer shrink-0"
+            title="Close modal"
           >
             <X className="w-5 h-5" />
           </button>

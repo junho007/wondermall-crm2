@@ -71,7 +71,7 @@ export interface ColumnDefinition {
   isNumeric?: boolean;
 }
 
-export type UserRole = 'admin' | 'accountant' | 'cs';
+export type UserRole = 'admin' | 'accountant' | 'cs' | 'marketing';
 
 export interface UserRoleInfo {
   role: UserRole;

@@ -1,14 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import { Trophy, Crown, Flame, Award, ShoppingBag, UserCheck, MapPin, Search, TrendingUp, Sparkles, Filter } from 'lucide-react';
-import { ShopeeOrder } from '../types';
+import { ShopeeOrder, UserRole } from '../types';
 import { getStateFromAddress } from '../utils/addressHelper';
 import { inferBuyerRace } from '../utils/raceHelper';
+import { maskCustomerName, maskUsername, maskPhone, maskPrice } from '../utils/maskHelper';
 
 interface TopRankingsTabProps {
   orders: ShopeeOrder[];
+  userRole?: UserRole;
 }
 
-export const TopRankingsTab: React.FC<TopRankingsTabProps> = ({ orders }) => {
+export const TopRankingsTab: React.FC<TopRankingsTabProps> = ({ orders, userRole = 'admin' }) => {
   // Top Products Aggregation
   const topProducts = useMemo(() => {
     const map = new Map<string, { productName: string; units: number; gmv: number; completedCount: number }>();
@@ -389,7 +391,7 @@ export const TopRankingsTab: React.FC<TopRankingsTabProps> = ({ orders }) => {
                       <div className="min-w-0 flex-1 space-y-0.5">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-extrabold text-xs text-slate-900">
-                            @{spender.username}
+                            @{maskUsername(spender.username, userRole)}
                           </span>
                           {isVipPlatinum ? (
                             <span className="px-1.5 py-0.2 text-[9px] font-black rounded bg-purple-100 text-purple-800 border border-purple-300">
@@ -402,7 +404,7 @@ export const TopRankingsTab: React.FC<TopRankingsTabProps> = ({ orders }) => {
                           ) : null}
                         </div>
                         <div className="text-xs text-slate-700 font-bold">
-                          {spender.buyerName}
+                          {maskCustomerName(spender.buyerName, userRole)}
                         </div>
                         {/* Location Badge - Clean, uncropped */}
                         <div className="pt-1 flex items-center gap-1.5 flex-wrap">
@@ -411,7 +413,7 @@ export const TopRankingsTab: React.FC<TopRankingsTabProps> = ({ orders }) => {
                             <span>{spender.state}</span>
                           </span>
                           <span className="text-[10px] text-slate-500 font-mono font-medium">
-                            {spender.phone}
+                            {maskPhone(spender.phone, userRole)}
                           </span>
                         </div>
                       </div>
@@ -419,7 +421,7 @@ export const TopRankingsTab: React.FC<TopRankingsTabProps> = ({ orders }) => {
 
                     <div className="text-right shrink-0">
                       <div className="font-mono font-black text-sm text-emerald-700">
-                        RM {spender.totalSpent.toFixed(2)}
+                        {maskPrice(spender.totalSpent, userRole, (v) => `RM ${v.toFixed(2)}`)}
                       </div>
                       <div className="text-[10px] font-bold text-slate-500 mt-0.5">
                         {spender.orderCount} order(s)

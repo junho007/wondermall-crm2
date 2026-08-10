@@ -1,15 +1,19 @@
 import React, { useState } from 'react';
-import { X, Copy, Check, Gamepad2, CreditCard, User, ShoppingBag, Clock, Send, CheckCircle2, Phone, MapPin, Receipt, Globe, Sparkles } from 'lucide-react';
-import { ShopeeOrder } from '../types';
+import { X, Copy, Check, Gamepad2, CreditCard, User, ShoppingBag, Clock, Send, CheckCircle2, Phone, MapPin, Receipt, Globe, Sparkles, ArrowLeft } from 'lucide-react';
+import { ShopeeOrder, UserRole } from '../types';
 import { calculateNetIncome, getTimelineTimestamps, formatMalaysiaTime, getMerchandiseGmv, adjustHoursToDateString } from '../utils/csvHelper';
+import { maskCustomerName, maskUsername, maskPhone, maskAddress, maskPrice } from '../utils/maskHelper';
 
 interface OrderDetailsModalProps {
   order: ShopeeOrder | null;
   onClose: () => void;
   onUpdateOrder?: (updatedOrder: ShopeeOrder) => void;
+  onBack?: () => void;
+  backLabel?: string;
+  userRole?: UserRole;
 }
 
-export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, onUpdateOrder }) => {
+export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, onUpdateOrder, onBack, backLabel, userRole = 'admin' }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
 
@@ -62,12 +66,14 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onC
   };
 
   const platformName = order.platform || order.channel || 'Platform';
-  const displayBuyerName = order.buyerName || order.recipientName || order.buyerUsername || `${platformName} Customer`;
-  const displayPhone = order.buyerPhone || order.recipientPhone || 'Not provided';
-  const displayAddress = order.shippingAddress || 'Address not available';
+  const rawBuyerName = order.buyerName || order.recipientName || order.buyerUsername || `${platformName} Customer`;
+  const displayBuyerName = maskCustomerName(rawBuyerName, userRole);
+  const displayUsername = maskUsername(order.buyerUsername, userRole);
+  const displayPhone = maskPhone(order.buyerPhone || order.recipientPhone, userRole);
+  const displayAddress = maskAddress(order.shippingAddress, userRole);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/50 backdrop-blur-xs animate-fadeIn">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
       <div
         className="w-full max-w-2xl rounded-2xl bg-white border border-slate-200 text-slate-900 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
@@ -75,9 +81,21 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onC
         {/* Modal Header */}
         <div className="p-4 sm:p-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className="w-10 h-10 aspect-square shrink-0 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
-              <Gamepad2 className="w-5 h-5" />
-            </div>
+            {onBack ? (
+              <button
+                type="button"
+                onClick={onBack}
+                className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
+                title="Return to customer orders list"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>{backLabel || 'Back to Customer Profile'}</span>
+              </button>
+            ) : (
+              <div className="w-10 h-10 aspect-square shrink-0 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
+                <Gamepad2 className="w-5 h-5" />
+              </div>
+            )}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-base sm:text-lg font-extrabold text-slate-900 truncate">
@@ -113,7 +131,7 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onC
                 Purchased Digital Asset ({order.items && order.items.length > 1 ? `${order.items.length} Product Variants` : '1 Item'})
               </span>
               <span className="text-lg sm:text-xl font-black font-mono text-slate-900">
-                RM {getMerchandiseGmv(order).toFixed(2)}
+                {maskPrice(getMerchandiseGmv(order), userRole, (v) => `RM ${v.toFixed(2)}`)}
               </span>
             </div>
             <p className="text-sm sm:text-base font-bold text-slate-900 leading-relaxed">{order.productName}</p>
@@ -148,7 +166,7 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onC
                           <span className="text-slate-500 line-through text-[11px]">RM {item.retailPrice?.toFixed(2)}</span>
                         ) : null}
                         <span className="font-mono font-black text-slate-900 bg-slate-100 px-2 py-1 rounded border border-slate-200">
-                          RM {item.paidAmount?.toFixed(2) || '0.00'}
+                          {maskPrice(item.paidAmount || 0, userRole, (v) => `RM ${v.toFixed(2)}`)}
                         </span>
                         <span className="text-slate-500 font-bold">x{item.quantity || 1}</span>
                       </div>
@@ -183,10 +201,10 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onC
                 <User className="w-3.5 h-3.5 text-blue-600" /> Buyer Username
               </span>
               <div className="flex items-center justify-between font-bold text-sm text-slate-900">
-                <span className="truncate">@{order.buyerUsername}</span>
+                <span className="truncate">@{displayUsername}</span>
                 <button
                   type="button"
-                  onClick={() => handleCopy(order.buyerUsername, 'modal_user')}
+                  onClick={() => handleCopy(displayUsername, 'modal_user')}
                   className="p-1 rounded text-slate-400 hover:text-slate-700 cursor-pointer"
                   title="Copy Username"
                 >
@@ -323,37 +341,37 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onC
                 <div className="divide-y divide-slate-200 text-xs">
                   <div className="py-2 flex items-center justify-between">
                     <span className="font-semibold text-slate-700">Merchandise Subtotal (GMV)</span>
-                    <span className="font-mono font-bold text-slate-900">RM {merchandiseSubtotal.toFixed(2)}</span>
+                    <span className="font-mono font-bold text-slate-900">{maskPrice(merchandiseSubtotal, userRole, (v) => `RM ${v.toFixed(2)}`)}</span>
                   </div>
 
                   <div className="py-2 flex items-center justify-between text-blue-600">
                     <span className="font-medium">Voucher Used / Seller Discount</span>
-                    <span className="font-mono font-bold">- RM {sellerVoucher.toFixed(2)}</span>
+                    <span className="font-mono font-bold">{maskPrice(sellerVoucher, userRole, (v) => `- RM ${v.toFixed(2)}`)}</span>
                   </div>
 
                   <div className="py-2 flex items-center justify-between text-rose-600">
                     <span className="font-medium">Commission Fee</span>
-                    <span className="font-mono font-bold">- RM {commissionFee.toFixed(2)}</span>
+                    <span className="font-mono font-bold">{maskPrice(commissionFee, userRole, (v) => `- RM ${v.toFixed(2)}`)}</span>
                   </div>
 
                   <div className="py-2 flex items-center justify-between text-amber-600">
                     <span className="font-medium">{platformName === 'Lazada' ? 'Payment / Transaction Fee' : 'Transaction Fee'}</span>
-                    <span className="font-mono font-bold">- RM {transactionFee.toFixed(2)}</span>
+                    <span className="font-mono font-bold">{maskPrice(transactionFee, userRole, (v) => `- RM ${v.toFixed(2)}`)}</span>
                   </div>
 
                   <div className="py-2 flex items-center justify-between text-rose-700">
                     <span className="font-medium">Service Fee</span>
-                    <span className="font-mono font-bold">- RM {serviceFee.toFixed(2)}</span>
+                    <span className="font-mono font-bold">{maskPrice(serviceFee, userRole, (v) => `- RM ${v.toFixed(2)}`)}</span>
                   </div>
 
                   <div className="py-2 flex items-center justify-between text-purple-600">
                     <span className="font-medium">{platformName === 'Lazada' ? 'Marketing / Promotional Fee' : 'Ads / Technical Fee'}</span>
-                    <span className="font-mono font-bold">- RM {adsEscrowFee.toFixed(2)}</span>
+                    <span className="font-mono font-bold">{maskPrice(adsEscrowFee, userRole, (v) => `- RM ${v.toFixed(2)}`)}</span>
                   </div>
 
                   <div className="py-2 flex items-center justify-between text-emerald-700 font-extrabold text-sm pt-2">
                     <span>Net Escrow Deposited to Wallet</span>
-                    <span className="font-mono">RM {netEscrow.toFixed(2)}</span>
+                    <span className="font-mono">{maskPrice(netEscrow, userRole, (v) => `RM ${v.toFixed(2)}`)}</span>
                   </div>
                 </div>
               </div>

@@ -1,13 +1,15 @@
 import React, { useState, useMemo } from 'react';
-import { ShopeeOrder } from '../types';
+import { ShopeeOrder, UserRole } from '../types';
 import { calculateNetIncome } from '../utils/csvHelper';
+import { maskPrice } from '../utils/maskHelper';
 import { Info, Clock, ChevronDown, ChevronUp, Wallet } from 'lucide-react';
 
 interface IncomeOverviewCardProps {
   orders: ShopeeOrder[];
+  userRole?: UserRole;
 }
 
-export const IncomeOverviewCard: React.FC<IncomeOverviewCardProps> = ({ orders }) => {
+export const IncomeOverviewCard: React.FC<IncomeOverviewCardProps> = ({ orders, userRole = 'admin' }) => {
   const [isExpanded, setIsExpanded] = useState(true);
 
   // Helper to get MYT Date strings
@@ -64,7 +66,7 @@ export const IncomeOverviewCard: React.FC<IncomeOverviewCardProps> = ({ orders }
     };
   }, [orders]);
 
-  const fmt = (num: number) => `RM ${num.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const fmt = (num: number) => maskPrice(num, userRole, (val) => `RM ${val.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 
   return (
     <div className="bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden animate-fadeIn space-y-0">

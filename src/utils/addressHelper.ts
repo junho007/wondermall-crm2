@@ -61,6 +61,28 @@ export function getStateFromAddress(address: string | undefined): string {
 }
 
 /**
+ * Infer Country from address string (Malaysia, Singapore, China, Indonesia).
+ */
+export function inferCountryFromAddress(address: string | undefined | null): string {
+  if (!address || typeof address !== 'string' || !address.trim()) {
+    return 'Malaysia';
+  }
+
+  const normalized = address.toLowerCase();
+  if (normalized.includes('singapore') || normalized.includes(' sg ') || normalized.includes(', sg')) {
+    return 'Singapore';
+  }
+  if (normalized.includes('china') || normalized.includes('cn') || normalized.includes('guangdong') || normalized.includes('shenzhen')) {
+    return 'China';
+  }
+  if (normalized.includes('indonesia') || normalized.includes(' id ') || normalized.includes('jakarta')) {
+    return 'Indonesia';
+  }
+
+  return 'Malaysia';
+}
+
+/**
  * Formats address so that the tail (state/postcode) is visible, truncating the front with '...'
  * Example: '...SS 15/4D, 47500 Subang Jaya, Selangor'
  */

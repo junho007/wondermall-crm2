@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import { Wallet, DollarSign, ShieldCheck, Tag, Receipt, TrendingDown, ArrowDownRight, Eye, ArrowUpDown, ArrowUp, ArrowDown, ShoppingBag } from 'lucide-react';
-import { ShopeeOrder, DatePreset, SortConfig, ColumnDefinition } from '../types';
+import { ShopeeOrder, DatePreset, SortConfig, ColumnDefinition, UserRole } from '../types';
 import { calculateNetIncome, getTimelineTimestamps, getOrInferChannel, isCancelledOrder } from '../utils/csvHelper';
+import { maskCustomerName, maskUsername, maskPrice } from '../utils/maskHelper';
 import { OrderDetailsModal } from './OrderDetailsModal';
 import { StatusFilterTabs } from './StatusFilterTabs';
 
@@ -14,6 +15,7 @@ interface FinancialPanelProps {
   tableRowDensity?: 'compact' | 'comfortable' | 'spacious';
   currencyPrefix?: 'RM' | 'MYR' | 'PLAIN';
   csFinancialShield?: boolean;
+  userRole?: UserRole;
 }
 
 export const FinancialPanel: React.FC<FinancialPanelProps> = ({
@@ -25,6 +27,7 @@ export const FinancialPanel: React.FC<FinancialPanelProps> = ({
   tableRowDensity = 'comfortable',
   currencyPrefix = 'RM',
   csFinancialShield = false,
+  userRole = 'admin',
 }) => {
   const [inspectOrder, setInspectOrder] = useState<ShopeeOrder | null>(null);
 
@@ -515,8 +518,10 @@ export const FinancialPanel: React.FC<FinancialPanelProps> = ({
               ) : (
                 sortedOrders.map((o) => {
                   const netEscrow = calculateNetIncome(o);
-                  const buyerName = o.buyerName || o.recipientName;
-                  const username = o.buyerUsername || 'Shopee Customer';
+                  const rawBuyerName = o.buyerName || o.recipientName;
+                  const rawUsername = o.buyerUsername || 'Shopee Customer';
+                  const buyerName = maskCustomerName(rawBuyerName, userRole);
+                  const username = maskUsername(rawUsername, userRole);
                   const gmv = (o.costOfGoodsSold && o.costOfGoodsSold > 0) ? o.costOfGoodsSold : (o.totalAmount || 0);
 
                   return (
@@ -649,6 +654,7 @@ export const FinancialPanel: React.FC<FinancialPanelProps> = ({
         <OrderDetailsModal
           order={inspectOrder}
           onClose={() => setInspectOrder(null)}
+          userRole={userRole}
         />
       )}
     </div>

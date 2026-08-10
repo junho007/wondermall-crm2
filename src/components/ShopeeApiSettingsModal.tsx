@@ -136,8 +136,10 @@ export const ShopeeApiSettingsModal: React.FC<ShopeeApiSettingsModalProps> = ({
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition-colors cursor-pointer"
+            className="p-2 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 transition-colors cursor-pointer shrink-0"
+            title="Close modal"
           >
             <X className="w-5 h-5" />
           </button>

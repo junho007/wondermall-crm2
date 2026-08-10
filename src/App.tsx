@@ -20,7 +20,7 @@ import { SmsMarketingPanel } from './components/SmsMarketingPanel';
 import { ChannelTabs, ChannelType } from './components/ChannelTabs';
 import { IncomeOverviewCard } from './components/IncomeOverviewCard';
 import { parseCSVString, exportOrdersToCSV, calculateNetIncome, getOrInferChannel, mergeOrderArrays } from './utils/csvHelper';
-import { getStateFromAddress } from './utils/addressHelper';
+import { getStateFromAddress, inferCountryFromAddress } from './utils/addressHelper';
 import { inferBuyerRace } from './utils/raceHelper';
 import { SAMPLE_SHOPEE_CSV, INITIAL_COLUMNS } from './data/sampleData';
 import { ShopeeOrder, OrderItem, SortConfig, ColumnDefinition, DatePreset, UserRole } from './types';
@@ -855,10 +855,10 @@ export default function App() {
         if (!matches) return false;
       }
 
-      // State filter (multi-select)
+      // Country filter (multi-select)
       if (selectedStates.length > 0 && !selectedStates.includes('All')) {
-        const orderState = getStateFromAddress(order.shippingAddress);
-        if (!selectedStates.includes(orderState)) return false;
+        const orderCountry = inferCountryFromAddress(order.shippingAddress);
+        if (!selectedStates.includes(orderCountry)) return false;
       }
 
       // Race/Ethnicity filter (multi-select)
@@ -1049,7 +1049,7 @@ export default function App() {
           {activeTab === 'orders' && (
             <div className="space-y-4">
               {/* Shopee Income Overview Panel */}
-              <IncomeOverviewCard orders={channelFilteredOrders} />
+              <IncomeOverviewCard orders={channelFilteredOrders} userRole={userRole} />
 
               <StatusFilterTabs
                 orders={channelFilteredOrders}
@@ -1092,6 +1092,7 @@ export default function App() {
                 searchQuery={searchQuery}
                 tableRowDensity={tableRowDensity}
                 currencyPrefix={currencyPrefix}
+                userRole={userRole}
               />
 
               <PaginationControls
@@ -1109,12 +1110,12 @@ export default function App() {
 
           {/* TAB 3: CUSTOMER DIRECTORY */}
           {activeTab === 'customers' && (
-            <CustomerDirectory orders={channelFilteredOrders} />
+            <CustomerDirectory orders={channelFilteredOrders} userRole={userRole} />
           )}
 
           {/* TAB 4: TOP RANKINGS & ANALYTICS */}
           {activeTab === 'topRankings' && (
-            <TopRankingsTab orders={filteredOrders} />
+            <TopRankingsTab orders={filteredOrders} userRole={userRole} />
           )}
 
           {/* TAB 5: FINANCIAL & ESCROW */}
@@ -1128,6 +1129,7 @@ export default function App() {
               tableRowDensity={tableRowDensity}
               currencyPrefix={currencyPrefix}
               csFinancialShield={csFinancialShield}
+              userRole={userRole}
             />
           )}
 
@@ -1152,8 +1154,8 @@ export default function App() {
                 </div>
               )}
 
-              {/* BOX 1: DATA INTEGRATION & PLATFORM CONNECTIONS (Hidden for Accountant) */}
-              {userRole !== 'accountant' && (
+              {/* BOX 1: DATA INTEGRATION & PLATFORM CONNECTIONS (Admin Only) */}
+              {!['accountant', 'cs', 'marketing'].includes(userRole) && (
                 <div className="bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-4">
                   <div className="flex items-center gap-2.5 pb-2 border-b border-slate-100">
                     <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center font-bold shrink-0">
@@ -1545,6 +1547,7 @@ export default function App() {
       <ChangePasswordModal
         isOpen={isChangePasswordOpen}
         onClose={() => setIsChangePasswordOpen(false)}
+        userRole={userRole}
       />
 
       {/* Team Member Sessions Modal */}
@@ -1552,6 +1555,7 @@ export default function App() {
         isOpen={isTeamMembersOpen}
         onClose={() => setIsTeamMembersOpen(false)}
         userRole={userRole}
+        onOpenChangePassword={() => setIsChangePasswordOpen(true)}
       />
 
       {/* Order Inspector Modal */}
@@ -1559,6 +1563,7 @@ export default function App() {
         order={selectedOrder}
         onClose={() => setSelectedOrder(null)}
         onUpdateOrder={handleUpdateOrder}
+        userRole={userRole}
       />
 
       {/* Sales Chart Modal */}

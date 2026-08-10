@@ -29,7 +29,8 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts';
-import { ShopeeOrder, SortConfig, ColumnDefinition } from '../types';
+import { ShopeeOrder, SortConfig, ColumnDefinition, UserRole } from '../types';
+import { maskCustomerName, maskUsername, maskPrice } from '../utils/maskHelper';
 
 interface DataTableProps {
   orders: ShopeeOrder[];
@@ -41,6 +42,7 @@ interface DataTableProps {
   searchQuery: string;
   tableRowDensity?: 'compact' | 'comfortable' | 'spacious';
   currencyPrefix?: 'RM' | 'MYR' | 'PLAIN';
+  userRole?: UserRole;
 }
 
 export const DataTable: React.FC<DataTableProps> = ({
@@ -53,6 +55,7 @@ export const DataTable: React.FC<DataTableProps> = ({
   searchQuery,
   tableRowDensity = 'comfortable',
   currencyPrefix = 'RM',
+  userRole = 'admin',
 }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'table' | 'chart'>('table');
@@ -357,19 +360,21 @@ export const DataTable: React.FC<DataTableProps> = ({
                           if (col.key === 'buyerUsername') {
                             const username = order.buyerUsername || 'Shopee Customer';
                             const realName = order.buyerName || order.recipientName;
+                            const maskedUser = maskUsername(username, userRole);
+                            const maskedName = realName ? maskCustomerName(realName, userRole) : '';
                             return (
                               <td
                                 key={col.key}
                                 className={`${cellPadding} whitespace-nowrap max-w-[160px] truncate`}
-                                title={realName && realName !== username ? `${username} (${realName})` : username}
+                                title={maskedName && maskedName !== maskedUser ? `${maskedUser} (${maskedName})` : maskedUser}
                               >
                                 <div className="flex items-center gap-1.5 min-w-0">
                                   <User className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                                   <div className="truncate flex flex-col min-w-0 leading-tight">
-                                    <span className="truncate font-semibold text-slate-900">{renderHighlightedText(username)}</span>
-                                    {realName && realName !== username && (
+                                    <span className="truncate font-semibold text-slate-900">{renderHighlightedText(maskedUser)}</span>
+                                    {maskedName && maskedName !== maskedUser && (
                                       <span className="text-[10px] text-slate-500 font-normal truncate">
-                                        {renderHighlightedText(realName)}
+                                        {renderHighlightedText(maskedName)}
                                       </span>
                                     )}
                                   </div>

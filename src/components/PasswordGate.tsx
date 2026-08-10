@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Lock, KeyRound, ShieldCheck, Eye, EyeOff, ArrowRight, AlertCircle, Settings, Check, User, Monitor, ChevronDown } from 'lucide-react';
 import { WonderMallLogo } from './WonderMallLogo';
+import { getDepartmentPasswords } from '../utils/maskHelper';
+import { UserRole } from '../types';
 
 export const STAFF_COLLEAGUES = ['Gio', 'Billy', 'Grace', 'Fennie', 'Junaidah', 'Boey', 'Jun'];
 
@@ -79,21 +81,24 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({ onAuthenticated, the
     e.preventDefault();
     setErrorMsg(null);
 
-    const adminPassword = getStoredPassword(); // default 'gio988'
+    const deptPass = getDepartmentPasswords();
     const trimmedInput = inputPassword.trim();
 
-    let authenticatedRole: 'admin' | 'accountant' | 'cs' | null = null;
+    let authenticatedRole: UserRole | null = null;
     let roleTitle = '';
 
-    if (trimmedInput === adminPassword || trimmedInput === 'gio988') {
+    if (trimmedInput === deptPass.admin || trimmedInput === 'gio988') {
       authenticatedRole = 'admin';
       roleTitle = 'Admin / Manager';
-    } else if (trimmedInput === 'acc988') {
+    } else if (trimmedInput === deptPass.accountant || trimmedInput === 'acc988') {
       authenticatedRole = 'accountant';
       roleTitle = 'Accountant';
-    } else if (trimmedInput === 'cs988') {
+    } else if (trimmedInput === deptPass.cs || trimmedInput === 'cs988') {
       authenticatedRole = 'cs';
-      roleTitle = 'Customer Service & Marketing';
+      roleTitle = 'Customer Service';
+    } else if (trimmedInput === deptPass.marketing || trimmedInput === 'mkt988') {
+      authenticatedRole = 'marketing';
+      roleTitle = 'Marketing Team';
     }
 
     if (authenticatedRole) {
@@ -126,7 +131,7 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({ onAuthenticated, the
         onAuthenticated();
       }, 400);
     } else {
-      setErrorMsg('Incorrect access password for Admin, Accountant, or CS staff.');
+      setErrorMsg('Incorrect access password. Valid keys: Admin, Accountant, CS (cs988), or Marketing (mkt988).');
       setInputPassword('');
     }
   };
