@@ -1,0 +1,6 @@
+{
+  "name": "WonderMall Shopee Data Suite",
+  "description": "Shopee Open Platform API integration & analytics viewer for WonderMall e-commerce orders and digital vouchers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+@layer utilities {
+  /* All text and numbers use Inter font family */
+  .font-number,
+  .font-mono,
+  .font-body,
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  }
+
+  /* WonderMall Dark Theme Glass Cards */
+  .glass-card {
+    background: #161616;
+    border: 1px solid rgba(233, 206, 121, 0.2);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  }
+
+  /* Gold Brand Accents */
+  .text-brand-gold {
+    color: #E9CE79;
+  }
+
+  .bg-brand-gold {
+    background-color: #E9CE79;
+  }
+
+  .border-brand-gold {
+    border-color: rgba(233, 206, 121, 0.4);
+  }
+
+  .neon-text-gold {
+    color: #E9CE79;
+    text-shadow: 0 0 10px rgba(233, 206, 121, 0.35);
+  }
+
+  /* Order Status Badge Utility Styles */
+  .status-completed {
+    border-color: #10b981;
+    color: #34d399;
+    background: rgba(16, 185, 129, 0.12);
+  }
+
+  .status-unpaid {
+    border-color: #f59e0b;
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.12);
+  }
+
+  .status-cancelled {
+    border-color: #ef4444;
+    color: #f87171;
+    background: rgba(239, 68, 68, 0.12);
+  }
+}
+
+body {
+  background-color: #0e0e0e;
+  color: #f4f4f5;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  min-height: 100vh;
+}
