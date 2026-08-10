@@ -32,12 +32,55 @@ export function getDepartmentPasswords(): Record<UserRole, string> {
   };
 }
 
-export function saveDepartmentPasswords(passwords: Record<UserRole, string>): void {
+export async function syncPasswordsWithServer(): Promise<{
+  departmentPasswords: Record<UserRole, string>;
+  staffPasswords: StaffPasswordEntry[];
+}> {
+  if (typeof window === 'undefined') {
+    return {
+      departmentPasswords: getDepartmentPasswords(),
+      staffPasswords: getStaffPasswords(),
+    };
+  }
+
+  try {
+    const res = await fetch('/api/passwords');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.departmentPasswords) {
+        saveDepartmentPasswords(data.departmentPasswords, false);
+      }
+      if (data.staffPasswords && Array.isArray(data.staffPasswords)) {
+        saveStaffPasswords(data.staffPasswords, false);
+      }
+      return {
+        departmentPasswords: data.departmentPasswords || getDepartmentPasswords(),
+        staffPasswords: data.staffPasswords || getStaffPasswords(),
+      };
+    }
+  } catch (err) {
+    console.warn('Failed to sync passwords with database server:', err);
+  }
+
+  return {
+    departmentPasswords: getDepartmentPasswords(),
+    staffPasswords: getStaffPasswords(),
+  };
+}
+
+export function saveDepartmentPasswords(passwords: Record<UserRole, string>, syncServer = true): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem('wm_department_passwords', JSON.stringify(passwords));
     if (passwords.admin) {
       localStorage.setItem('wm_dashboard_password', passwords.admin);
+    }
+    if (syncServer) {
+      fetch('/api/passwords', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ departmentPasswords: passwords }),
+      }).catch((err) => console.warn('Server sync failed for department passwords', err));
     }
   } catch (err) {
     console.warn('Failed to save department passwords', err);
@@ -135,10 +178,17 @@ export function getStaffPasswords(): StaffPasswordEntry[] {
   return [];
 }
 
-export function saveStaffPasswords(entries: StaffPasswordEntry[]): void {
+export function saveStaffPasswords(entries: StaffPasswordEntry[], syncServer = true): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem('wm_staff_passwords', JSON.stringify(entries));
+    if (syncServer) {
+      fetch('/api/passwords', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ staffPasswords: entries }),
+      }).catch((err) => console.warn('Server sync failed for staff passwords', err));
+    }
   } catch (err) {
     console.warn('Failed to save staff passwords', err);
   }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Lock, KeyRound, ShieldCheck, Eye, EyeOff, ArrowRight, AlertCircle, Settings, Check, User, Monitor, ChevronDown } from 'lucide-react';
 import { WonderMallLogo } from './WonderMallLogo';
-import { getDepartmentPasswords } from '../utils/maskHelper';
+import { getDepartmentPasswords, getStaffPasswords, syncPasswordsWithServer } from '../utils/maskHelper';
 import { UserRole } from '../types';
 
 export const STAFF_COLLEAGUES = ['Gio', 'Billy', 'Grace', 'Fennie', 'Junaidah', 'Boey', 'Jun'];
@@ -67,6 +67,7 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({ onAuthenticated, the
 
   useEffect(() => {
     setDeviceSig(getDeviceSignature());
+    syncPasswordsWithServer().catch((err) => console.warn('Failed sync on mount:', err));
 
     const handleClickOutside = (event: MouseEvent) => {
       if (colleagueDropdownRef.current && !colleagueDropdownRef.current.contains(event.target as Node)) {
@@ -82,12 +83,18 @@ export const PasswordGate: React.FC<PasswordGateProps> = ({ onAuthenticated, the
     setErrorMsg(null);
 
     const deptPass = getDepartmentPasswords();
+    const staffPasses = getStaffPasswords();
     const trimmedInput = inputPassword.trim();
 
     let authenticatedRole: UserRole | null = null;
     let roleTitle = '';
 
-    if (trimmedInput === deptPass.admin || trimmedInput === 'gio988') {
+    // Check individual staff custom passwords first
+    const staffMatch = staffPasses.find((sp) => sp.password === trimmedInput);
+    if (staffMatch) {
+      authenticatedRole = staffMatch.role;
+      roleTitle = `${staffMatch.staffName} (${staffMatch.role.toUpperCase()})`;
+    } else if (trimmedInput === deptPass.admin || trimmedInput === 'gio988') {
       authenticatedRole = 'admin';
       roleTitle = 'Admin / Manager';
     } else if (trimmedInput === deptPass.accountant || trimmedInput === 'acc988') {

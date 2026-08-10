@@ -30,7 +30,7 @@ import {
   Cell,
 } from 'recharts';
 import { ShopeeOrder, SortConfig, ColumnDefinition, UserRole } from '../types';
-import { maskCustomerName, maskUsername, maskPrice } from '../utils/maskHelper';
+import { maskCustomerName, maskUsername, maskPhone, maskAddress, maskPrice } from '../utils/maskHelper';
 
 interface DataTableProps {
   orders: ShopeeOrder[];
@@ -425,7 +425,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                                 className={`${cellPadding} font-extrabold text-slate-900 text-xs whitespace-nowrap font-mono`}
                                 title={`GMV Subtotal: ${fmtCurr(gmv)}`}
                               >
-                                {fmtCurr(gmv)}
+                                {maskPrice(gmv, userRole, (val) => fmtCurr(val))}
                               </td>
                             );
                           }
@@ -433,7 +433,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                           if (col.key === 'sellerVoucherDiscount') {
                             return (
                               <td key={col.key} className={`${cellPadding} text-blue-600 font-mono text-xs whitespace-nowrap font-medium`}>
-                                {fmtCurr(order.sellerVoucherDiscount, true)}
+                                {maskPrice(order.sellerVoucherDiscount, userRole, (val) => fmtCurr(val, true))}
                               </td>
                             );
                           }
@@ -441,7 +441,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                           if (col.key === 'commissionFee') {
                             return (
                               <td key={col.key} className={`${cellPadding} text-rose-600 font-mono text-xs whitespace-nowrap font-medium`}>
-                                {fmtCurr(order.commissionFee, true)}
+                                {maskPrice(order.commissionFee, userRole, (val) => fmtCurr(val, true))}
                               </td>
                             );
                           }
@@ -449,7 +449,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                           if (col.key === 'transactionFee') {
                             return (
                               <td key={col.key} className={`${cellPadding} text-amber-600 font-mono text-xs whitespace-nowrap font-medium`}>
-                                {fmtCurr(order.transactionFee, true)}
+                                {maskPrice(order.transactionFee, userRole, (val) => fmtCurr(val, true))}
                               </td>
                             );
                           }
@@ -457,7 +457,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                           if (col.key === 'adsEscrowFee') {
                             return (
                               <td key={col.key} className={`${cellPadding} text-purple-600 font-mono text-xs whitespace-nowrap font-medium`}>
-                                {fmtCurr(order.adsEscrowFee, true)}
+                                {maskPrice(order.adsEscrowFee, userRole, (val) => fmtCurr(val, true))}
                               </td>
                             );
                           }
@@ -465,7 +465,7 @@ export const DataTable: React.FC<DataTableProps> = ({
                           if (col.key === 'escrowAmount') {
                             return (
                               <td key={col.key} className={`${cellPadding} font-extrabold text-emerald-700 whitespace-nowrap font-mono`}>
-                                {fmtCurr(calculateNetIncome(order))}
+                                {maskPrice(calculateNetIncome(order), userRole, (val) => fmtCurr(val))}
                               </td>
                             );
                           }
@@ -547,9 +547,37 @@ export const DataTable: React.FC<DataTableProps> = ({
                           }
 
                           const rawVal = order[col.key];
+                          const keyLower = String(col.key).toLowerCase();
+                          const labelLower = String(col.label || '').toLowerCase();
+
+                          let renderedVal = rawVal !== undefined && rawVal !== null ? String(rawVal) : '-';
+
+                          if (keyLower.includes('phone') || labelLower.includes('phone') || keyLower.includes('mobile')) {
+                            renderedVal = maskPhone(renderedVal, userRole);
+                          } else if (keyLower.includes('address') || labelLower.includes('address')) {
+                            renderedVal = maskAddress(renderedVal, userRole);
+                          } else if (
+                            (keyLower.includes('name') || labelLower.includes('name') || keyLower.includes('recipient') || keyLower.includes('buyer')) &&
+                            !keyLower.includes('username')
+                          ) {
+                            renderedVal = maskCustomerName(renderedVal, userRole);
+                          } else if (keyLower.includes('username') || labelLower.includes('username')) {
+                            renderedVal = maskUsername(renderedVal, userRole);
+                          } else if (
+                            keyLower.includes('price') || labelLower.includes('price') ||
+                            keyLower.includes('amount') || labelLower.includes('amount') ||
+                            keyLower.includes('cost') || labelLower.includes('cost') ||
+                            keyLower.includes('fee') || labelLower.includes('fee') ||
+                            keyLower.includes('total') || labelLower.includes('total') ||
+                            keyLower.includes('income') || labelLower.includes('income') ||
+                            keyLower.includes('value') || labelLower.includes('value')
+                          ) {
+                            renderedVal = maskPrice(rawVal as any, userRole);
+                          }
+
                           return (
                             <td key={col.key} className={`${cellPadding} whitespace-nowrap text-slate-700`}>
-                              {rawVal !== undefined && rawVal !== null ? String(rawVal) : '-'}
+                              {renderedVal}
                             </td>
                           );
                         })}

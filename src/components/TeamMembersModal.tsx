@@ -7,6 +7,7 @@ import {
   DEFAULT_DEPARTMENT_PASSWORDS,
   getStaffPasswords,
   deleteStaffPassword,
+  syncPasswordsWithServer,
   StaffPasswordEntry
 } from '../utils/maskHelper';
 
@@ -59,6 +60,10 @@ export const TeamMembersModal: React.FC<TeamMembersModalProps> = ({
       fetchSessions();
       setDeptPasswords(getDepartmentPasswords());
       setStaffPasswords(getStaffPasswords());
+      syncPasswordsWithServer().then((res) => {
+        setDeptPasswords(res.departmentPasswords);
+        setStaffPasswords(res.staffPasswords);
+      }).catch((err) => console.warn('Sync failed in TeamMembersModal:', err));
     }
   }, [isOpen]);
 

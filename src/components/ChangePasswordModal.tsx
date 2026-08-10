@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Lock, ShieldCheck, Check, AlertCircle, Eye, EyeOff, KeyRound, Award, User } from 'lucide-react';
 import { UserRole } from '../types';
-import { getDepartmentPasswords, saveDepartmentPasswords, saveStaffPassword } from '../utils/maskHelper';
+import { getDepartmentPasswords, saveDepartmentPasswords, saveStaffPassword, syncPasswordsWithServer } from '../utils/maskHelper';
 
 interface ChangePasswordModalProps {
   isOpen: boolean;
@@ -35,6 +35,9 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
     setConfirmPassword('');
     setErrorMsg(null);
     setSuccessMsg(null);
+    if (isOpen) {
+      syncPasswordsWithServer().catch((err) => console.warn('Sync failed in ChangePasswordModal:', err));
+    }
   }, [isOpen, userRole]);
 
   if (!isOpen) return null;
