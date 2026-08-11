@@ -475,8 +475,8 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({ orders, us
                   </span>
                 </div>
 
-                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-2xs">
-                  <div className="overflow-x-auto">
+                <div className="border border-slate-200 rounded-xl bg-white shadow-2xs relative">
+                  <div className="overflow-visible">
                     <table className="w-full text-left border-collapse">
                       <thead>
                         <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
@@ -521,14 +521,17 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({ orders, us
                               <td className="py-3 px-3 whitespace-nowrap font-mono text-[11px] text-slate-500">
                                 {ord.orderDate || 'N/A'}
                               </td>
-                              <td className="py-3 px-3 max-w-[180px] relative group/prod" title={ord.productName}>
-                                <div className="font-bold text-slate-900 truncate cursor-help">
+                              <td className="py-3 px-3 max-w-[180px] relative group/prod">
+                                <div className="font-bold text-slate-900 truncate cursor-pointer hover:text-blue-700 transition-colors">
                                   {ord.productName}
                                 </div>
-                                {/* Hover Preview Tooltip */}
-                                <div className="absolute left-3 bottom-full mb-1 hidden group-hover/prod:block z-50 w-max max-w-xs p-2.5 rounded-xl bg-slate-900 text-white text-[11px] font-medium shadow-2xl pointer-events-none leading-snug border border-slate-700 animate-fadeIn">
-                                  <div className="text-[10px] text-blue-400 font-bold uppercase mb-0.5">Full Product Name</div>
-                                  {ord.productName}
+                                {/* Hover Preview Tooltip matching Order Management */}
+                                <div className="absolute left-0 bottom-full mb-1.5 z-50 hidden group-hover/prod:block w-72 sm:w-80 p-3 bg-white text-slate-900 text-xs rounded-xl shadow-2xl border border-slate-200/90 pointer-events-none leading-snug whitespace-normal ring-1 ring-slate-900/5">
+                                  <div className="text-[10px] text-blue-600 font-extrabold uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                                    <ShoppingBag className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                    <span>FULL PRODUCT NAME</span>
+                                  </div>
+                                  <div className="font-bold text-slate-900 break-words">{ord.productName}</div>
                                 </div>
                                 {ord.channel && (
                                   <span className="text-[10px] text-slate-400 font-medium block">
