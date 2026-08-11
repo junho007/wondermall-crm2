@@ -279,7 +279,7 @@ export default function App() {
   const [userRole, setUserRole] = useState<UserRole>(() => {
     if (typeof window === 'undefined') return 'admin';
     const saved = (sessionStorage.getItem('wm_user_role') || localStorage.getItem('wm_user_role')) as UserRole;
-    if (saved && ['admin', 'accountant', 'cs'].includes(saved)) return saved;
+    if (saved && ['admin', 'accountant', 'cs', 'marketing'].includes(saved)) return saved;
     return 'admin';
   });
 
@@ -287,7 +287,7 @@ export default function App() {
   useEffect(() => {
     if (isAuthenticated) {
       const saved = (sessionStorage.getItem('wm_user_role') || localStorage.getItem('wm_user_role')) as UserRole;
-      if (saved && ['admin', 'accountant', 'cs'].includes(saved)) {
+      if (saved && ['admin', 'accountant', 'cs', 'marketing'].includes(saved)) {
         setUserRole(saved);
       }
     }
@@ -300,7 +300,11 @@ export default function App() {
         setActiveTab('overview');
       }
     } else if (userRole === 'cs') {
-      if (activeTab === 'financial') {
+      if (['financial', 'sms'].includes(activeTab)) {
+        setActiveTab('overview');
+      }
+    } else if (userRole === 'marketing') {
+      if (['topRankings', 'customers', 'financial', 'sms'].includes(activeTab)) {
         setActiveTab('overview');
       }
     }

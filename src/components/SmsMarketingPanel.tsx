@@ -100,7 +100,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
   const [singleRecipientName, setSingleRecipientName] = useState<string>('');
 
   const [messageText, setMessageText] = useState<string>(
-    'Hi {buyerName}! Thank you for ordering from *WONDERMALL* on Shopee! Your digital voucher code is ready. Reply here or to SMS if you need help!'
+    'Hi {buyerName}! Thank you for ordering from WCGMall on Shopee. Your voucher code is ready in your chat!'
   );
 
   const [isSending, setIsSending] = useState<boolean>(false);
@@ -112,20 +112,22 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
 
   // Extract unique customers from orders with phone number detection
   const customerList = useMemo(() => {
-    const map = new Map<string, { username: string; name: string; phone: string; state: string; category: string; isValidPhone: boolean }>();
+    const map = new Map<string, { username: string; name: string; phone: string; country: string; product: string; isValidPhone: boolean }>();
 
     orders.forEach((o) => {
       const username = o.buyerUsername || 'buyer';
       const rawPhone = o.buyerPhone || o.recipientPhone || '';
       const isPhoneValid = isValidSmsPhone(rawPhone);
+      const countryVal = o.country || 'Malaysia';
+      const productVal = o.productName || o.productCategory || 'Digital Product';
 
       if (!map.has(username)) {
         map.set(username, {
           username,
           name: o.buyerName || o.recipientName || username,
           phone: rawPhone || 'Hidden by Shopee',
-          state: o.state || 'Selangor',
-          category: o.productCategory || 'Digital Codes',
+          country: countryVal,
+          product: productVal,
           isValidPhone: isPhoneValid,
         });
       } else {
@@ -143,29 +145,29 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
   const reachableCustomers = useMemo(() => customerList.filter((c) => c.isValidPhone), [customerList]);
   const hiddenCustomersCount = customerList.length - reachableCustomers.length;
 
-  // Extract unique states & categories
-  const statesList = useMemo(() => {
-    const set = new Set(reachableCustomers.map((c) => c.state).filter(Boolean));
-    return ['All', ...Array.from(set)];
-  }, [reachableCustomers]);
-
-  const categoriesList = useMemo(() => {
-    const set = new Set(orders.map((o) => o.productCategory).filter(Boolean));
+  // Extract unique countries & available products
+  const countriesList = useMemo(() => {
+    const set = new Set(orders.map((o) => o.country || 'Malaysia').filter(Boolean));
     return ['All', ...Array.from(set)];
   }, [orders]);
 
-  // Filtered recipients count (Only targeting reachable contacts with valid phone numbers)
+  const productsList = useMemo(() => {
+    const set = new Set(orders.map((o) => o.productName).filter(Boolean));
+    return ['All', ...Array.from(set)];
+  }, [orders]);
+
+  // Filtered recipients count
   const targetRecipients = useMemo(() => {
     if (audienceMode === 'single') {
       return isValidSmsPhone(singlePhone)
-        ? [{ name: singleRecipientName || 'Customer', phone: singlePhone, username: 'custom', state: 'Custom', category: 'General' }]
+        ? [{ name: singleRecipientName || 'Customer', phone: singlePhone, username: 'custom', country: 'Malaysia', product: 'General' }]
         : [];
     }
     if (audienceMode === 'state' && selectedState !== 'All') {
-      return reachableCustomers.filter((c) => c.state === selectedState);
+      return reachableCustomers.filter((c) => c.country === selectedState);
     }
     if (audienceMode === 'category' && selectedCategory !== 'All') {
-      return reachableCustomers.filter((c) => c.category === selectedCategory);
+      return reachableCustomers.filter((c) => c.product === selectedCategory);
     }
     return reachableCustomers;
   }, [audienceMode, selectedState, selectedCategory, singlePhone, singleRecipientName, reachableCustomers]);
@@ -323,36 +325,31 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
     setTimeout(() => setIsSaved(false), 2500);
   };
 
-  // Dynamic Template Variation Engine (Plain Text, No Emojis for Low Charge & Fast Delivery)
+  // Dynamic Template Variation Engine (Short, Plain Text, No Emojis for 1 SMS Segment)
   const CAMPAIGN_TEMPLATES: Record<string, string[]> = {
     voucher: [
-      'Hi {buyerName}! Your *WONDERMALL* digital top-up voucher is active & ready! Thank you for buying from us on Shopee.',
-      'Hello {buyerName}! Your digital code order is completed. Check your Shopee chat or SMS now! - *WONDERMALL*',
-      'Hi {buyerName}, your instant game top-up code is ready for activation! Enjoy your gaming with *WONDERMALL*.',
+      'Hi {buyerName}! Thank you for ordering from WCGMall on Shopee. Your voucher code is ready in your chat!',
+      'Hello {buyerName}! Your digital code order is completed on Shopee. Check your chat now! - WCGMall',
     ],
     promo: [
-      'Hi {buyerName}! Exclusive offer for valued buyers: Enjoy 10% OFF MLBB & Steam codes on *WONDERMALL*! Voucher Code: *WCG10OFF*',
-      'Exclusive reward for {buyerName}! Claim 10% instant rebate on your next reload with code: *WCG2026*. - WONDERMALL',
-      'Hey {buyerName}! Special discount today! Get 10% OFF all digital game cards using code: *WCGSPECIAL10*',
+      'Hi {buyerName}! Special offer: Get 10% OFF your next order on WCGMall! Code: WCG10OFF',
+      'Exclusive reward for {buyerName}! Claim 10% rebate on your next reload with code: WCG2026.',
     ],
     restock: [
-      'Hi {buyerName}! Fresh restock alert! MLBB Diamonds, PUBG UC & Steam Wallet codes are live at *WONDERMALL*!',
-      'Great news {buyerName}! Fresh supply of Genshin Genesis Crystals & Roblox pins just arrived at WONDERMALL Store!',
-      'Hey {buyerName}! Top up your favourite games now with 24/7 instant automated code delivery on WONDERMALL!',
+      'Hi {buyerName}! Fresh restock alert! MLBB, PUBG & Steam Wallet codes are live at WCGMall!',
+      'Great news {buyerName}! Fresh supply of game codes just arrived at WCGMall Store!',
     ],
     loyalty: [
-      'Hi {buyerName}, as a VIP buyer at *WONDERMALL*, here is an exclusive bonus cashback code: *VIPWCG2026*!',
-      'Thank you for your loyal support {buyerName}! Enjoy priority code fulfillment and 5% extra cashback on WONDERMALL today.',
-      'VIP Alert for {buyerName}! Redeem your exclusive cashback voucher *VIPBONUS* now at WONDERMALL.',
+      'Hi {buyerName}, as a VIP buyer at WCGMall, here is an exclusive bonus cashback code: VIPWCG2026!',
+      'Thank you for your loyal support {buyerName}! Enjoy 5% extra cashback on WCGMall today.',
     ],
     festive: [
-      'Hi {buyerName}! Festive Top-Up Flash Sale is LIVE! Enjoy massive discounts on MLBB, PUBG & Razer Gold on WONDERMALL.',
-      'Festive Deals for {buyerName}! Instant delivery + bonus game credits on every top-up today at WONDERMALL!',
-      'Celebrate & Game On {buyerName}! Exclusive festive prices on all game vouchers at WONDERMALL Store.',
+      'Hi {buyerName}! Flash Sale is LIVE! Enjoy massive discounts on all game codes at WCGMall.',
+      'Special Deals for {buyerName}! Instant delivery + bonus game credits today at WCGMall!',
     ],
     review: [
-      'Hi {buyerName}! Rate your recent order 5 stars on Shopee & reply to get a RM5 bonus voucher for your next top-up!',
-      'Hello {buyerName}! We value your feedback! Leave a 5-star review on Shopee & claim 50 Diamonds bonus code!',
+      'Hi {buyerName}! Rate your order 5 stars on Shopee & reply to get a bonus voucher for your next top-up!',
+      'Hello {buyerName}! Leave a 5-star review on Shopee & claim your bonus code!',
     ],
   };
 
@@ -519,37 +516,14 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
               <h2 className="text-base font-extrabold text-slate-900 tracking-tight">
                 SMS &amp; WhatsApp Marketing Hub
               </h2>
-              <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-black uppercase flex items-center gap-1">
+              <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold uppercase flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
-                WhatsApp Direct &amp; Movider SMS Online
+                Movider SMS Gateway Active
               </span>
             </div>
             <p className="text-xs text-slate-500 font-medium mt-0.5">
-              Engage Shopee buyers with automated order notifications, voucher delivery, and instant 1-click WhatsApp messaging.
+              Engage Shopee buyers with automated order notifications, voucher delivery, and instant messaging.
             </p>
-          </div>
-        </div>
-
-        {/* Marketing Balance & Channel Indicators */}
-        <div className="flex items-center gap-3 bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-200">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-emerald-100 text-emerald-700">
-              <MessageCircle className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="text-[10px] uppercase font-bold text-slate-500">WhatsApp Web API</div>
-              <div className="text-xs font-black text-emerald-700">1-Click Direct Chat</div>
-            </div>
-          </div>
-          <div className="h-6 w-px bg-slate-200"></div>
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-blue-100 text-blue-700">
-              <DollarSign className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="text-[10px] uppercase font-bold text-slate-500">Movider SMS Credits</div>
-              <div className="text-xs font-black text-slate-900">5,000 Credits</div>
-            </div>
           </div>
         </div>
       </div>
@@ -569,67 +543,40 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
 
       {/* Main Grid: Settings, Campaign Composer, & WhatsApp Preview */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Movider API Key & WhatsApp Direct Credentials Settings */}
+        {/* Left Column: Sender Settings */}
         <div className="bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-4">
           <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
             <Key className="w-4 h-4 text-emerald-600" />
             <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
-              Movider &amp; WhatsApp Settings
+              Sender Settings
             </h3>
           </div>
 
           <form onSubmit={handleSaveCredentials} className="space-y-3.5">
             <div>
-              <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                Movider API Key
-              </label>
-              <input
-                type="text"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="e.g. movider_key_99x82a..."
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-xs font-mono font-semibold text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-                Movider API Secret
-              </label>
-              <input
-                type="password"
-                value={apiSecret}
-                onChange={(e) => setApiSecret(e.target.value)}
-                placeholder="••••••••••••••••••••"
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-xs font-mono font-semibold text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white"
-              />
-            </div>
-
-            <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-[11px] font-bold text-slate-700 uppercase">
-                  Sender ID / Approved Brand Name
+                  Sender Name
                 </label>
-                <span className="text-[10px] text-amber-600 font-bold">Exact Case Sensitive</span>
               </div>
               <input
                 type="text"
                 value={senderId}
                 onChange={(e) => setSenderId(e.target.value)}
-                placeholder="e.g. WonderMall"
+                placeholder="e.g. WonderMall or <WCGMall>"
                 maxLength={11}
                 className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white"
               />
               <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                 <span className="text-[10px] text-slate-500 font-medium">Approved Names:</span>
-                {['WonderMall', 'WonderCG', 'Fennie'].map((name) => (
+                {['WonderMall', 'WCGMall', '<WCGMall>', '[WCGMall]'].map((name) => (
                   <button
                     key={name}
                     type="button"
                     onClick={() => setSenderId(name)}
                     className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
                       senderId === name
-                        ? 'bg-emerald-600 text-white shadow-sm'
+                        ? 'bg-emerald-600 text-white shadow-xs'
                         : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
                     }`}
                   >
@@ -642,15 +589,15 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
             {isSaved && (
               <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-1.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>Marketing API settings saved successfully!</span>
+                <span>Sender settings saved successfully!</span>
               </div>
             )}
 
             <button
               type="submit"
-              className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold uppercase tracking-wider transition-all cursor-pointer shadow-xs"
+              className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-xs"
             >
-              Save Credentials
+              Save Settings
             </button>
           </form>
         </div>
@@ -722,8 +669,8 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
                 { id: 'all', label: `Reachable (${reachableCustomers.length})` },
-                { id: 'state', label: 'By State / Region' },
-                { id: 'category', label: 'By Category' },
+                { id: 'state', label: 'Country' },
+                { id: 'category', label: 'By Product' },
                 { id: 'single', label: 'Single Recipient' },
               ].map((tab) => (
                 <button
@@ -744,12 +691,12 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
             {/* Audience Filters */}
             {audienceMode === 'state' && (
               <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
-                <span className="font-bold text-slate-600 shrink-0">Select State:</span>
+                <span className="font-bold text-slate-600 shrink-0">Select Country:</span>
                 <div className="w-64">
                   <CustomDropdown
-                    options={statesList.map((st) => ({
-                      value: st,
-                      label: st === 'All' ? 'All States in Malaysia' : st,
+                    options={countriesList.map((c) => ({
+                      value: c,
+                      label: c === 'All' ? 'All Countries' : c,
                     }))}
                     value={selectedState}
                     onChange={setSelectedState}
@@ -760,12 +707,12 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
 
             {audienceMode === 'category' && (
               <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
-                <span className="font-bold text-slate-600 shrink-0">Select Product Category:</span>
+                <span className="font-bold text-slate-600 shrink-0">Select Product:</span>
                 <div className="w-64">
                   <CustomDropdown
-                    options={categoriesList.map((cat) => ({
-                      value: cat,
-                      label: cat === 'All' ? 'All Product Categories' : cat,
+                    options={productsList.map((p) => ({
+                      value: p,
+                      label: p === 'All' ? 'All Products' : p,
                     }))}
                     value={selectedCategory}
                     onChange={setSelectedCategory}
@@ -804,11 +751,11 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
             )}
           </div>
 
-          {/* Quick Campaign Templates & Formatting Bar */}
+          {/* Quick Campaign Templates */}
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
               <label className="font-bold text-slate-700 uppercase text-[11px] flex items-center gap-1.5">
-                <span>2. Message Templates (Formatted for WhatsApp &amp; SMS)</span>
+                <span>2. Message Templates</span>
                 <Sparkles className="w-3.5 h-3.5 text-amber-500" />
               </label>
               <span className="text-[11px] text-slate-400 font-medium">Variable: <code>{'{buyerName}'}</code></span>
@@ -822,7 +769,6 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
               >
                 <FileText className="w-3.5 h-3.5 text-emerald-600" />
                 <span>Voucher Ready</span>
-                <Sparkles className="w-3 h-3 text-amber-500" />
               </button>
               <button
                 type="button"
@@ -867,41 +813,12 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
             </div>
           </div>
 
-          {/* Format Injectors */}
-          <div className="flex items-center gap-2 pt-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase">Quick Formatting:</span>
-            <button
-              onClick={() => injectFormatting('*Bold Text*')}
-              className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-extrabold cursor-pointer"
-            >
-              *Bold*
-            </button>
-            <button
-              onClick={() => injectFormatting('_Italic Text_')}
-              className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold italic cursor-pointer"
-            >
-              _Italic_
-            </button>
-            <button
-              onClick={() => injectFormatting('🛍️ WONDERMALL')}
-              className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer"
-            >
-              🛍️ Store Emoji
-            </button>
-            <button
-              onClick={() => injectFormatting('🚀 Voucher Code')}
-              className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold cursor-pointer"
-            >
-              🚀 Code Emoji
-            </button>
-          </div>
-
-          {/* Composer Box & Live WhatsApp Preview Split */}
+          {/* Composer Box & Live Preview */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Textarea */}
             <div>
               <textarea
-                rows={6}
+                rows={5}
                 value={messageText}
                 onChange={(e) => setMessageText(e.target.value)}
                 placeholder="Type your campaign message content..."
@@ -923,24 +840,9 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
                   </span>
                 </div>
               </div>
-
-              {hasUnicode && (
-                <div className="mt-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[10.5px] flex items-center justify-between gap-2">
-                  <span>
-                    ⚠️ <strong>Emoji Detected (🎁/🛍️):</strong> Switches encoding to Unicode (70 chars/segment limit). Causes multi-segment pricing ($0.050) & telco filtering delays.
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleCleanEmojis}
-                    className="px-2 py-1 rounded bg-amber-200 hover:bg-amber-300 text-amber-950 font-bold text-[10px] shrink-0 cursor-pointer"
-                  >
-                    Remove Emojis
-                  </button>
-                </div>
-              )}
             </div>
 
-            {/* Realistic Live WhatsApp Chat Preview */}
+            {/* Live Chat Preview */}
             <div className="rounded-xl border border-emerald-300 bg-[#e5ddd5] p-3 shadow-inner flex flex-col justify-between overflow-hidden relative min-h-[160px]">
               {/* WhatsApp Header */}
               <div className="bg-[#075e54] text-white p-2 rounded-t-lg -mx-3 -mt-3 flex items-center justify-between shadow-xs mb-2">
@@ -950,7 +852,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
                   </div>
                   <div>
                     <div className="text-xs font-bold leading-tight">WONDERMALL Official Store</div>
-                    <div className="text-[9px] text-emerald-200">Online • WhatsApp Verified</div>
+                    <div className="text-[9px] text-emerald-200">Online • Verified</div>
                   </div>
                 </div>
                 <MessageCircle className="w-4 h-4 text-emerald-300" />
@@ -969,7 +871,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
 
               {/* Footer Indicator */}
               <div className="text-[10px] text-emerald-900 font-bold bg-emerald-100/80 px-2 py-0.5 rounded text-center mt-2 border border-emerald-200">
-                💬 WhatsApp Chat Preview for {previewRecipient.name}
+                Preview for {previewRecipient.name}
               </div>
             </div>
           </div>
@@ -1031,8 +933,8 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
               <tr className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200 sticky top-0 bg-slate-50">
                 <th className="py-2.5 px-3">Buyer Name</th>
                 <th className="py-2.5 px-3">Phone Number</th>
-                <th className="py-2.5 px-3">State / Region</th>
-                <th className="py-2.5 px-3">Product Category</th>
+                <th className="py-2.5 px-3">Country</th>
+                <th className="py-2.5 px-3">Product</th>
                 <th className="py-2.5 px-3 text-right">Action</th>
               </tr>
             </thead>
@@ -1045,8 +947,8 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
                     <td className="py-2 px-3 font-mono font-bold text-emerald-700">
                       {r.phone} <span className="text-[10px] text-slate-400 font-normal">(+{waFormatted})</span>
                     </td>
-                    <td className="py-2 px-3 text-slate-600">{r.state || 'Selangor'}</td>
-                    <td className="py-2 px-3 text-slate-600">{r.category || 'Digital Vouchers'}</td>
+                    <td className="py-2 px-3 text-slate-600">{r.country || 'Malaysia'}</td>
+                    <td className="py-2 px-3 text-slate-600">{r.product || 'Digital Product'}</td>
                     <td className="py-2 px-3 text-right">
                       <button
                         onClick={() => handleLaunchWhatsAppChat(r)}

@@ -102,7 +102,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     } else if (userRole === 'cs') {
       if (['financial', 'sms'].includes(item.id)) return false;
     } else if (userRole === 'marketing') {
-      if (['financial', 'sms'].includes(item.id)) return false;
+      if (['topRankings', 'customers', 'financial', 'sms'].includes(item.id)) return false;
     }
     return true;
   });
