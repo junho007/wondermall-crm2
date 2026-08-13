@@ -1007,6 +1007,7 @@ export default function App() {
         {/* Top Sticky Header & Channel Tabs Bar */}
         <div className="shrink-0 z-30 w-full bg-white shadow-xs border-b border-slate-200">
           <Header
+            activeTab={activeTab}
             activeTabTitle={tabTitles[activeTab]}
             onOpenTeamMembersModal={() => setIsTeamMembersOpen(true)}
             onSyncData={handleSyncData}

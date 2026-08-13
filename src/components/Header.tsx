@@ -1,8 +1,20 @@
 import React from 'react';
-import { RefreshCw, User, ShieldCheck, Key, Clock, ShieldAlert, Award } from 'lucide-react';
+import {
+  RefreshCw,
+  User,
+  LayoutDashboard,
+  ShoppingCart,
+  Users,
+  Wallet,
+  Settings,
+  Trophy,
+  MessageSquare,
+} from 'lucide-react';
 import { UserRole } from '../types';
+import { ActiveTab } from './Sidebar';
 
 interface HeaderProps {
+  activeTab: ActiveTab;
   activeTabTitle: string;
   onOpenTeamMembersModal?: () => void;
   onSyncData: () => void;
@@ -13,7 +25,18 @@ interface HeaderProps {
   onSwitchRole?: () => void;
 }
 
+const tabIcons: Record<ActiveTab, React.ElementType> = {
+  overview: LayoutDashboard,
+  orders: ShoppingCart,
+  customers: Users,
+  topRankings: Trophy,
+  financial: Wallet,
+  sms: MessageSquare,
+  settings: Settings,
+};
+
 export const Header: React.FC<HeaderProps> = ({
+  activeTab,
   activeTabTitle,
   onOpenTeamMembersModal,
   onSyncData,
@@ -24,17 +47,16 @@ export const Header: React.FC<HeaderProps> = ({
   onSwitchRole,
 }) => {
   const colleagueName = (typeof window !== 'undefined' && (sessionStorage.getItem('wm_colleague_name') || localStorage.getItem('wm_colleague_name'))) || '';
+  const IconComponent = tabIcons[activeTab] || LayoutDashboard;
 
   return (
     <header className="w-full bg-white border-b border-slate-100 px-4 sm:px-6 py-2.5 flex items-center justify-between">
-      {/* Page Title & Breadcrumb */}
-      <div>
-        <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-500">
-          <span>WCG Digital Admin</span>
-          <span>/</span>
-          <span className="text-blue-600 font-bold">{activeTabTitle}</span>
+      {/* Active Tab Icon & Title (Clean Header) */}
+      <div className="flex items-center gap-2.5">
+        <div className="p-2 rounded-xl bg-blue-50 text-blue-600 border border-blue-100/80 flex items-center justify-center shrink-0">
+          <IconComponent className="w-5 h-5 text-blue-600" />
         </div>
-        <h1 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight leading-tight mt-0.5">
+        <h1 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight leading-tight">
           {activeTabTitle}
         </h1>
       </div>
@@ -54,12 +76,11 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         )}
 
-        {/* Scheduled Auto-Sync Info */}
+        {/* Last Synced Time Info */}
         <div className="hidden lg:flex flex-col items-end text-right">
-          <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
-            <Clock className="w-3 h-3 text-blue-600" /> Auto-Sync: 8AM &amp; 8PM MYT
+          <span className="text-[11px] font-semibold text-slate-500">
+            Updated: <span className="text-slate-700 font-mono font-bold">{lastSyncedTime}</span>
           </span>
-          <span className="text-[10px] text-slate-400 font-mono">Updated: {lastSyncedTime}</span>
         </div>
 
         {/* Prominent Top-Right Refresh Button */}

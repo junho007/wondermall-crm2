@@ -79,15 +79,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
     }
     return saved;
   });
-  const [senderId, setSenderId] = useState(() => {
-    const saved = localStorage.getItem('wm_movider_sender_id');
-    if (!saved || saved === 'WONDERMALL') {
-      localStorage.setItem('wm_movider_sender_id', 'WonderMall');
-      return 'WonderMall';
-    }
-    return saved;
-  });
-  const [isSaved, setIsSaved] = useState(false);
+  const senderId = 'WCGMall';
 
   // Marketing Channel Selection - default to 'sms' so SMS blast sends real SMS
   const [dispatchChannel, setDispatchChannel] = useState<'sms' | 'whatsapp' | 'both'>('sms');
@@ -217,10 +209,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
             setApiSecret(data.settings.apiSecret);
             localStorage.setItem('wm_movider_api_secret', data.settings.apiSecret);
           }
-          if (data.settings.senderId) {
-            setSenderId(data.settings.senderId);
-            localStorage.setItem('wm_movider_sender_id', data.settings.senderId);
-          }
+          localStorage.setItem('wm_movider_sender_id', 'WCGMall');
         }
       }
 
@@ -298,32 +287,6 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
   useEffect(() => {
     fetchSmsLogsAndSettings();
   }, []);
-
-  // Save Movider Credentials
-  const handleSaveCredentials = async (e: React.FormEvent) => {
-    e.preventDefault();
-    localStorage.setItem('wm_movider_api_key', apiKey);
-    localStorage.setItem('wm_movider_api_secret', apiSecret);
-    localStorage.setItem('wm_movider_sender_id', senderId);
-
-    try {
-      await fetch('/api/send-sms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'save_settings',
-          apiKey,
-          apiSecret,
-          senderId,
-        }),
-      });
-    } catch (err) {
-      console.warn('KV save settings error:', err);
-    }
-
-    setIsSaved(true);
-    setTimeout(() => setIsSaved(false), 2500);
-  };
 
   // Dynamic Template Variation Engine (Short, Plain Text, No Emojis for 1 SMS Segment)
   const CAMPAIGN_TEMPLATES: Record<string, string[]> = {
@@ -441,7 +404,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
               action: 'send_sms',
               apiKey: apiKey || 'iPnNDUbKo2OyVvr5osnidwt8uL1-GW',
               apiSecret: apiSecret || 'Jl0WWdL6vGjbq5ZVT2qxLFJqUYadPE',
-              senderId: senderId || 'WONDERMALL',
+              senderId: 'WCGMall',
               recipientPhone: recipient.phone,
               recipientName: recipient.name || recipient.username,
               messageText: personalizedMsg,
@@ -541,77 +504,20 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
         </div>
       )}
 
-      {/* Main Grid: Settings, Campaign Composer, & WhatsApp Preview */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Sender Settings */}
-        <div className="bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-4">
-          <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-            <Key className="w-4 h-4 text-emerald-600" />
+      {/* Campaign Composer & Live WhatsApp Preview Card */}
+      <div className="w-full bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-4">
+        {/* Header & Channel Selector Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <Send className="w-4 h-4 text-emerald-600" />
             <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
-              Sender Settings
+              Compose Marketing Campaign
             </h3>
+            <span className="px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200 text-[10px] font-extrabold flex items-center gap-1 shadow-2xs">
+              <Smartphone className="w-3 h-3 text-blue-600" />
+              <span>SMS Sender: WCGMall</span>
+            </span>
           </div>
-
-          <form onSubmit={handleSaveCredentials} className="space-y-3.5">
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-[11px] font-bold text-slate-700 uppercase">
-                  Sender Name
-                </label>
-              </div>
-              <input
-                type="text"
-                value={senderId}
-                onChange={(e) => setSenderId(e.target.value)}
-                placeholder="e.g. WonderMall or <WCGMall>"
-                maxLength={11}
-                className="w-full px-3 py-2 rounded-lg bg-slate-50 border border-slate-300 text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white"
-              />
-              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                <span className="text-[10px] text-slate-500 font-medium">Approved Names:</span>
-                {['WonderMall', 'WCGMall', '<WCGMall>', '[WCGMall]'].map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => setSenderId(name)}
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                      senderId === name
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
-                    }`}
-                  >
-                    {name}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {isSaved && (
-              <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>Sender settings saved successfully!</span>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold uppercase tracking-wider transition-all cursor-pointer shadow-xs"
-            >
-              Save Settings
-            </button>
-          </form>
-        </div>
-
-        {/* Right 2 Columns: Omnichannel Campaign Composer & Live WhatsApp Preview */}
-        <div className="lg:col-span-2 bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-4">
-          {/* Header & Channel Selector Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
-            <div className="flex items-center gap-2">
-              <Send className="w-4 h-4 text-emerald-600" />
-              <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
-                Compose Marketing Campaign
-              </h3>
-            </div>
 
             {/* Dispatch Channel Switcher */}
             <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
@@ -848,10 +754,10 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
               <div className="bg-[#075e54] text-white p-2 rounded-t-lg -mx-3 -mt-3 flex items-center justify-between shadow-xs mb-2">
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-full bg-emerald-400 text-emerald-950 font-black text-[10px] flex items-center justify-center">
-                    WM
+                    WCG
                   </div>
                   <div>
-                    <div className="text-xs font-bold leading-tight">WONDERMALL Official Store</div>
+                    <div className="text-xs font-bold leading-tight">WCGMall Official Store</div>
                     <div className="text-[9px] text-emerald-200">Online • Verified</div>
                   </div>
                 </div>
@@ -911,7 +817,6 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
             </button>
           </div>
         </div>
-      </div>
 
       {/* Section 2: Interactive 1-Click WhatsApp Direct Chat Queue */}
       <div className="bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-3">

@@ -13,7 +13,7 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     try {
       let logs = [];
-      let settings = { apiKey: 'iPnNDUbKo2OyVvr5osnidwt8uL1-GW', apiSecret: 'Jl0WWdL6vGjbq5ZVT2qxLFJqUYadPE', senderId: 'WONDERMALL' };
+      let settings = { apiKey: 'iPnNDUbKo2OyVvr5osnidwt8uL1-GW', apiSecret: 'Jl0WWdL6vGjbq5ZVT2qxLFJqUYadPE', senderId: 'WCGMall' };
 
       try {
         if (process.env.KV_REST_API_URL || process.env.VERCEL_KV_REST_API_URL) {
@@ -31,9 +31,7 @@ export default async function handler(req, res) {
       if (!settings.apiKey && globalThis.__shopeeSmsSettings) {
         settings = globalThis.__shopeeSmsSettings;
       }
-      if (settings.senderId === 'WONDERMALL' || !settings.senderId) {
-        settings.senderId = 'WonderMall';
-      }
+      settings.senderId = 'WCGMall';
 
       return res.status(200).json({ logs, settings });
     } catch (err) {
@@ -48,7 +46,7 @@ export default async function handler(req, res) {
 
       // Save Movider API Settings
       if (action === 'save_settings') {
-        const newSettings = { apiKey: apiKey || '', apiSecret: apiSecret || '', senderId: senderId || 'WCGDIGITAL' };
+        const newSettings = { apiKey: apiKey || '', apiSecret: apiSecret || '', senderId: 'WCGMall' };
         globalThis.__shopeeSmsSettings = newSettings;
 
         try {
@@ -71,10 +69,7 @@ export default async function handler(req, res) {
 
         const effectiveKey = apiKey || process.env.MOVIDER_API_KEY || (globalThis.__shopeeSmsSettings && globalThis.__shopeeSmsSettings.apiKey) || 'iPnNDUbKo2OyVvr5osnidwt8uL1-GW';
         const effectiveSecret = apiSecret || process.env.MOVIDER_API_SECRET || (globalThis.__shopeeSmsSettings && globalThis.__shopeeSmsSettings.apiSecret) || 'Jl0WWdL6vGjbq5ZVT2qxLFJqUYadPE';
-        let effectiveSender = senderId || (globalThis.__shopeeSmsSettings && globalThis.__shopeeSmsSettings.senderId) || 'WonderMall';
-        if (effectiveSender === 'WONDERMALL') {
-          effectiveSender = 'WonderMall';
-        }
+        const effectiveSender = 'WCGMall';
 
         // Format phone number: remove leading plus or non-digits, e.g. +60109223278 -> 60109223278
         let cleanPhone = (recipientPhone || '').replace(/\s+/g, '');
