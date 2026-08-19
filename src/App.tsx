@@ -1117,7 +1117,11 @@ export default function App() {
 
           {/* TAB 3: CUSTOMER DIRECTORY */}
           {activeTab === 'customers' && (
-            <CustomerDirectory orders={channelFilteredOrders} userRole={userRole} />
+            <CustomerDirectory
+              orders={channelFilteredOrders}
+              userRole={userRole}
+              onOpenSmsTab={() => setActiveTab('sms')}
+            />
           )}
 
           {/* TAB 4: TOP RANKINGS & ANALYTICS */}

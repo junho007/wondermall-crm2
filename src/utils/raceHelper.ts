@@ -9,7 +9,7 @@
 
 import { ShopeeOrder } from '../types';
 
-export type BuyerRace = 'Malay' | 'Chinese' | 'Indian' | 'Others / Unassigned';
+export type BuyerRace = 'Malay' | 'Chinese' | 'Indian' | 'Others';
 
 export function inferBuyerRace(order: ShopeeOrder): BuyerRace {
   // Primary name fields take highest priority
@@ -18,7 +18,7 @@ export function inferBuyerRace(order: ShopeeOrder): BuyerRace {
     .join(' ');
 
   if (!primaryNameText.trim()) {
-    if (!order.shippingAddress) return 'Others / Unassigned';
+    if (!order.shippingAddress) return 'Others';
   }
 
   // Pre-process camelCase (e.g., FarisZulkefly -> Faris Zulkefly, AmirulAfiq -> Amirul Afiq)
@@ -30,7 +30,7 @@ export function inferBuyerRace(order: ShopeeOrder): BuyerRace {
   const tokens = expandedText.split(/[^a-z0-9]+/).filter(Boolean);
 
   if (tokens.length === 0) {
-    return 'Others / Unassigned';
+    return 'Others';
   }
 
   // 1. Comprehensive Malay Name Indicators & Roots
@@ -121,8 +121,8 @@ export function inferBuyerRace(order: ShopeeOrder): BuyerRace {
     }
   }
 
-  return 'Others / Unassigned';
+  return 'Others';
 }
 
-export const ALL_RACES: BuyerRace[] = ['Malay', 'Chinese', 'Indian', 'Others / Unassigned'];
+export const ALL_RACES: BuyerRace[] = ['Malay', 'Chinese', 'Indian', 'Others'];
 

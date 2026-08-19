@@ -110,7 +110,7 @@ export const StatusFilterTabs: React.FC<StatusFilterTabsProps> = ({
   const activeCountryHandler = onSelectCountries || onSelectStates;
 
   // Ethnicity Options
-  const raceOptions: OptionItem[] = ['All', 'Malay', 'Chinese', 'Indian', 'Other'].map((r) => ({
+  const raceOptions: OptionItem[] = ['All', 'Malay', 'Chinese', 'Indian', 'Others'].map((r) => ({
     value: r,
     label: r === 'All' ? 'All Ethnicities' : r,
   }));

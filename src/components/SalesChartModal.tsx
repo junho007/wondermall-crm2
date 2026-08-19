@@ -293,7 +293,7 @@ export const SalesChartModal: React.FC<SalesChartModalProps> = ({
       Malay: { revenue: 0, count: 0 },
       Chinese: { revenue: 0, count: 0 },
       Indian: { revenue: 0, count: 0 },
-      'Others / Unassigned': { revenue: 0, count: 0 },
+      Others: { revenue: 0, count: 0 },
     };
 
     modalOrders.forEach((o) => {
