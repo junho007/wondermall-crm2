@@ -275,9 +275,33 @@ function cleanCellString(val: any): string {
   return str.trim();
 }
 
-export function isMaskedString(val?: string): boolean {
+export function normalizeBuyerUsername(username?: string): string {
+  if (!username) return '';
+  return username.toLowerCase().trim().replace(/^@+/, '');
+}
+
+export function cleanPhoneNumber(phone?: string): string {
+  if (!phone) return '';
+  return phone.replace(/\D/g, '');
+}
+
+export function isMaskedString(val?: string | null): boolean {
   if (!val) return true;
-  return val.includes('*');
+  const trimmed = String(val).trim();
+  if (
+    trimmed === '' ||
+    trimmed === 'N/A' ||
+    trimmed === 'Hidden' ||
+    trimmed === 'Customer' ||
+    trimmed === 'Shopee Customer' ||
+    trimmed === 'Guest' ||
+    trimmed === 'Guest Customer' ||
+    trimmed === 'undefined' ||
+    trimmed === 'null'
+  ) {
+    return true;
+  }
+  return trimmed.includes('*');
 }
 
 export function selectUnmasked(existingVal?: string, newVal?: string): string {
@@ -290,6 +314,147 @@ export function selectUnmasked(existingVal?: string, newVal?: string): string {
     return existingVal;
   }
   return newVal;
+}
+
+export interface CustomerIntelligenceProfile {
+  buyerUsername?: string;
+  buyerName?: string;
+  recipientName?: string;
+  buyerPhone?: string;
+  recipientPhone?: string;
+  shippingAddress?: string;
+}
+
+/**
+ * Builds a customer intelligence registry from all orders and automatically propagates
+ * unmasked personal details (buyer name, recipient name, phone, address, etc.) to any
+ * repeat orders where data is masked by Shopee or Lazada API.
+ */
+export function enrichOrdersWithCustomerIntelligence(orders: ShopeeOrder[]): ShopeeOrder[] {
+  if (!orders || orders.length === 0) return [];
+
+  // Map by normalized username and clean phone number
+  const userProfileMap = new Map<string, CustomerIntelligenceProfile>();
+  const phoneProfileMap = new Map<string, CustomerIntelligenceProfile>();
+
+  const updateProfile = (profile: CustomerIntelligenceProfile, o: ShopeeOrder) => {
+    if (!isMaskedString(o.buyerName)) {
+      profile.buyerName = o.buyerName;
+    }
+    if (!isMaskedString(o.recipientName)) {
+      profile.recipientName = o.recipientName;
+    }
+    if (!isMaskedString(o.buyerPhone)) {
+      const clean = cleanPhoneNumber(o.buyerPhone);
+      if (clean.length >= 8) profile.buyerPhone = o.buyerPhone;
+    }
+    if (!isMaskedString(o.recipientPhone)) {
+      const clean = cleanPhoneNumber(o.recipientPhone);
+      if (clean.length >= 8) profile.recipientPhone = o.recipientPhone;
+    }
+    if (!isMaskedString(o.shippingAddress) && (o.shippingAddress?.trim().length || 0) >= 6) {
+      profile.shippingAddress = o.shippingAddress;
+    }
+    if (!isMaskedString(o.buyerUsername)) {
+      profile.buyerUsername = o.buyerUsername;
+    }
+  };
+
+  // Pass 1: Build the knowledge base of unmasked data from existing orders
+  orders.forEach((o) => {
+    const normUser = normalizeBuyerUsername(o.buyerUsername);
+    const cleanPh = cleanPhoneNumber(o.buyerPhone || o.recipientPhone);
+
+    let profile: CustomerIntelligenceProfile | undefined;
+    if (normUser && normUser !== 'guest' && normUser !== 'shopee_user') {
+      profile = userProfileMap.get(normUser);
+      if (!profile) {
+        profile = {};
+        userProfileMap.set(normUser, profile);
+      }
+      updateProfile(profile, o);
+    }
+
+    if (cleanPh.length >= 8) {
+      let phProfile = phoneProfileMap.get(cleanPh);
+      if (!phProfile) {
+        phProfile = profile || {};
+        phoneProfileMap.set(cleanPh, phProfile);
+      }
+      updateProfile(phProfile, o);
+    }
+  });
+
+  // Also check if there is custom edits in localStorage
+  if (typeof window !== 'undefined') {
+    try {
+      const savedEdits = localStorage.getItem('shopee_custom_order_edits_v1');
+      if (savedEdits) {
+        const editsObj: Record<string, Partial<ShopeeOrder>> = JSON.parse(savedEdits);
+        Object.values(editsObj).forEach((edit) => {
+          if (edit.buyerUsername) {
+            const normUser = normalizeBuyerUsername(edit.buyerUsername);
+            if (normUser) {
+              let profile = userProfileMap.get(normUser);
+              if (!profile) {
+                profile = {};
+                userProfileMap.set(normUser, profile);
+              }
+              if (!isMaskedString(edit.buyerName)) profile.buyerName = edit.buyerName;
+              if (!isMaskedString(edit.recipientName)) profile.recipientName = edit.recipientName;
+              if (!isMaskedString(edit.buyerPhone)) profile.buyerPhone = edit.buyerPhone;
+              if (!isMaskedString(edit.recipientPhone)) profile.recipientPhone = edit.recipientPhone;
+              if (!isMaskedString(edit.shippingAddress)) profile.shippingAddress = edit.shippingAddress;
+            }
+          }
+        });
+      }
+    } catch {
+      // Ignore localStorage read errors
+    }
+  }
+
+  // Pass 2: Enrich all orders with known customer intelligence
+  return orders.map((o) => {
+    const normUser = normalizeBuyerUsername(o.buyerUsername);
+    const cleanPh = cleanPhoneNumber(o.buyerPhone || o.recipientPhone);
+
+    const profile =
+      (normUser ? userProfileMap.get(normUser) : undefined) ||
+      (cleanPh.length >= 8 ? phoneProfileMap.get(cleanPh) : undefined);
+
+    if (!profile) return o;
+
+    const enriched: ShopeeOrder = { ...o };
+    let hasChanges = false;
+
+    if (isMaskedString(enriched.buyerName) && profile.buyerName) {
+      enriched.buyerName = profile.buyerName;
+      hasChanges = true;
+    }
+    if (isMaskedString(enriched.recipientName) && (profile.recipientName || profile.buyerName)) {
+      enriched.recipientName = profile.recipientName || profile.buyerName;
+      hasChanges = true;
+    }
+    if (isMaskedString(enriched.buyerPhone) && profile.buyerPhone) {
+      enriched.buyerPhone = profile.buyerPhone;
+      hasChanges = true;
+    }
+    if (isMaskedString(enriched.recipientPhone) && (profile.recipientPhone || profile.buyerPhone)) {
+      enriched.recipientPhone = profile.recipientPhone || profile.buyerPhone;
+      hasChanges = true;
+    }
+    if (isMaskedString(enriched.shippingAddress) && profile.shippingAddress) {
+      enriched.shippingAddress = profile.shippingAddress;
+      hasChanges = true;
+    }
+    if (isMaskedString(enriched.buyerUsername) && profile.buyerUsername) {
+      enriched.buyerUsername = profile.buyerUsername;
+      hasChanges = true;
+    }
+
+    return hasChanges ? enriched : o;
+  });
 }
 
 export function mergeTwoOrders(target: ShopeeOrder, source: ShopeeOrder): ShopeeOrder {

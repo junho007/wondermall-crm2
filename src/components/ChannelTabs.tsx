@@ -9,15 +9,44 @@ interface ChannelTabsProps {
   selectedChannel: ChannelType;
   onSelectChannel: (channel: ChannelType) => void;
   orders: ShopeeOrder[];
+  mode?: 'orders' | 'customers';
 }
 
 export const ChannelTabs: React.FC<ChannelTabsProps> = ({
   selectedChannel,
   onSelectChannel,
   orders,
+  mode = 'orders',
 }) => {
-  // Compute totals for each channel
+  // Compute totals for each channel based on mode (orders vs customers)
   const stats = React.useMemo(() => {
+    if (mode === 'customers') {
+      const allCustomers = new Set<string>();
+      const shopeeCustomers = new Set<string>();
+      const lazadaCustomers = new Set<string>();
+      const wcg2uCustomers = new Set<string>();
+
+      orders.forEach((o) => {
+        const custKey = (o.buyerUsername || o.buyerPhone || o.recipientName || 'Guest').toLowerCase().trim().replace(/^@+/, '');
+        allCustomers.add(custKey);
+        const ch = getOrInferChannel(o);
+        if (ch === 'Shopee') shopeeCustomers.add(custKey);
+        else if (ch === 'Lazada') lazadaCustomers.add(custKey);
+        else if (ch === 'WCG2U') wcg2uCustomers.add(custKey);
+      });
+
+      return {
+        counts: {
+          ALL: allCustomers.size,
+          Shopee: shopeeCustomers.size,
+          Lazada: lazadaCustomers.size,
+          WCG2U: wcg2uCustomers.size,
+        },
+        unit: 'customer',
+        unitPlural: 'customers',
+      };
+    }
+
     const counts = {
       ALL: orders.length,
       Shopee: 0,
@@ -30,8 +59,12 @@ export const ChannelTabs: React.FC<ChannelTabsProps> = ({
       counts[ch] = (counts[ch] || 0) + 1;
     });
 
-    return { counts };
-  }, [orders]);
+    return {
+      counts,
+      unit: 'order',
+      unitPlural: 'orders',
+    };
+  }, [orders, mode]);
 
   const channels: {
     key: ChannelType;
@@ -106,7 +139,7 @@ export const ChannelTabs: React.FC<ChannelTabsProps> = ({
                   isSelected ? ch.activeBadge : ch.inactiveBadge
                 }`}
               >
-                {count} {count === 1 ? 'order' : 'orders'}
+                {count} {count === 1 ? stats.unit : stats.unitPlural}
               </span>
             </button>
           );

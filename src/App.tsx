@@ -19,7 +19,7 @@ import { TeamMembersModal } from './components/TeamMembersModal';
 import { SmsMarketingPanel } from './components/SmsMarketingPanel';
 import { ChannelTabs, ChannelType } from './components/ChannelTabs';
 import { IncomeOverviewCard } from './components/IncomeOverviewCard';
-import { parseCSVString, exportOrdersToCSV, calculateNetIncome, getOrInferChannel, mergeOrderArrays } from './utils/csvHelper';
+import { parseCSVString, exportOrdersToCSV, calculateNetIncome, getOrInferChannel, mergeOrderArrays, enrichOrdersWithCustomerIntelligence } from './utils/csvHelper';
 import { getStateFromAddress, inferCountryFromAddress } from './utils/addressHelper';
 import { inferBuyerRace } from './utils/raceHelper';
 import { SAMPLE_SHOPEE_CSV, INITIAL_COLUMNS } from './data/sampleData';
@@ -57,7 +57,8 @@ const sanitizeOrdersList = (rawList: ShopeeOrder[]): ShopeeOrder[] => {
       orderStatus: sanitizeOrderStatus(item.orderStatus),
     });
   });
-  return Array.from(map.values());
+  const list = Array.from(map.values());
+  return enrichOrdersWithCustomerIntelligence(list);
 };
 
 const getCustomEditsFromStorage = (): Record<string, Partial<ShopeeOrder>> => {
@@ -1022,6 +1023,7 @@ export default function App() {
             selectedChannel={selectedChannel}
             onSelectChannel={setSelectedChannel}
             orders={orders}
+            mode={activeTab === 'customers' ? 'customers' : 'orders'}
           />
         </div>
 

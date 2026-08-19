@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Users, Search, Phone, MapPin, Download, ShoppingBag, ShieldCheck, UserCheck, Calendar, Eye, FileText, ArrowUpDown, ArrowUp, ArrowDown, X, Globe } from 'lucide-react';
 import { ShopeeOrder, UserRole } from '../types';
 import { inferBuyerRace } from '../utils/raceHelper';
-import { isCancelledOrder } from '../utils/csvHelper';
+import { isCancelledOrder, isMaskedString } from '../utils/csvHelper';
 import { OrderDetailsModal } from './OrderDetailsModal';
 import { CustomDropdown } from './CustomDropdown';
 import { maskCustomerName, maskUsername, maskPhone, maskAddress, maskPrice } from '../utils/maskHelper';
@@ -69,8 +69,9 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({ orders, us
     }>();
 
     orders.forEach((o) => {
-      const usernameKey = (o.buyerUsername || 'Guest Customer').toLowerCase().trim();
-      const nameVal = o.buyerName || o.recipientName || o.buyerUsername || 'Shopee Customer';
+      const usernameKey = (o.buyerUsername || 'Guest Customer').toLowerCase().trim().replace(/^@+/, '');
+      const rawName = o.buyerName || o.recipientName || '';
+      const nameVal = !isMaskedString(rawName) ? rawName : (o.buyerName || o.recipientName || o.buyerUsername || 'Shopee Customer');
       const phoneVal = o.buyerPhone || o.recipientPhone || 'N/A';
       const addressVal = o.shippingAddress || 'N/A';
       const countryVal = inferCountry(addressVal);
@@ -87,11 +88,38 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({ orders, us
         if (dateVal && dateVal > existing.lastOrderDate) {
           existing.lastOrderDate = dateVal;
         }
+
+        // Upgrade to unmasked real name and ethnicity if available
+        if (!isMaskedString(o.buyerName)) {
+          existing.name = o.buyerName;
+          existing.race = inferBuyerRace(o);
+        } else if (!isMaskedString(o.recipientName) && isMaskedString(existing.name)) {
+          existing.name = o.recipientName;
+          existing.race = inferBuyerRace(o);
+        }
+
+        // Upgrade to unmasked real phone if available
+        if (!isMaskedString(o.buyerPhone) && o.buyerPhone !== 'N/A') {
+          existing.phone = o.buyerPhone;
+        } else if (!isMaskedString(o.recipientPhone) && o.recipientPhone !== 'N/A' && isMaskedString(existing.phone)) {
+          existing.phone = o.recipientPhone;
+        }
+
+        // Upgrade to unmasked address and country if available
+        if (!isMaskedString(o.shippingAddress) && o.shippingAddress !== 'N/A' && (isMaskedString(existing.address) || existing.address === 'N/A')) {
+          existing.address = o.shippingAddress;
+          existing.country = inferCountry(o.shippingAddress);
+        }
+
+        // Upgrade username if clean
+        if (!isMaskedString(o.buyerUsername) && isMaskedString(existing.username)) {
+          existing.username = o.buyerUsername.replace(/^@+/, '');
+        }
       } else {
         const itemSet = new Set<string>();
         if (o.productName) itemSet.add(o.productName);
         customerMap.set(usernameKey, {
-          username: o.buyerUsername || 'Guest',
+          username: (o.buyerUsername || 'Guest').replace(/^@+/, ''),
           name: nameVal,
           phone: phoneVal,
           address: addressVal,
@@ -158,13 +186,15 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({ orders, us
   // Active Selected Customer & Customer Orders List
   const selectedCustomer = useMemo(() => {
     if (!selectedCustomerUser) return null;
-    return customers.find((c) => c.username.toLowerCase().trim() === selectedCustomerUser.toLowerCase().trim()) || null;
+    const target = selectedCustomerUser.toLowerCase().trim().replace(/^@+/, '');
+    return customers.find((c) => c.username.toLowerCase().trim().replace(/^@+/, '') === target) || null;
   }, [customers, selectedCustomerUser]);
 
   const selectedCustomerOrders = useMemo(() => {
     if (!selectedCustomerUser) return [];
+    const target = selectedCustomerUser.toLowerCase().trim().replace(/^@+/, '');
     return orders
-      .filter((o) => (o.buyerUsername || '').toLowerCase().trim() === selectedCustomerUser.toLowerCase().trim())
+      .filter((o) => (o.buyerUsername || '').toLowerCase().trim().replace(/^@+/, '') === target)
       .sort((a, b) => {
         const timeA = a.orderDate ? new Date(a.orderDate.replace(' ', 'T')).getTime() || 0 : 0;
         const timeB = b.orderDate ? new Date(b.orderDate.replace(' ', 'T')).getTime() || 0 : 0;
