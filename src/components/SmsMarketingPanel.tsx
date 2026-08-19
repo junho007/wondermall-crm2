@@ -85,11 +85,13 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
   const [dispatchChannel, setDispatchChannel] = useState<'sms' | 'whatsapp' | 'both'>('sms');
 
   // Audience & Composition State
-  const [audienceMode, setAudienceMode] = useState<'all' | 'state' | 'category' | 'single'>('all');
+  const [audienceMode, setAudienceMode] = useState<'all' | 'custom' | 'state' | 'category' | 'single'>('all');
   const [selectedState, setSelectedState] = useState<string>('All');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [singlePhone, setSinglePhone] = useState<string>('');
   const [singleRecipientName, setSingleRecipientName] = useState<string>('');
+  const [selectedCustomerUsernames, setSelectedCustomerUsernames] = useState<Set<string>>(new Set());
+  const [customerSearchQuery, setCustomerSearchQuery] = useState<string>('');
 
   const [messageText, setMessageText] = useState<string>(
     'Hi {buyerName}! Thank you for ordering from WCGMall on Shopee. Your voucher code is ready in your chat!'
@@ -148,12 +150,52 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
     return ['All', ...Array.from(set)];
   }, [orders]);
 
+  // Filtered customer picker list for custom selection
+  const filteredCustomerPickerList = useMemo(() => {
+    if (!customerSearchQuery.trim()) return reachableCustomers;
+    const q = customerSearchQuery.toLowerCase();
+    return reachableCustomers.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.username.toLowerCase().includes(q) ||
+        c.phone.includes(q) ||
+        c.country.toLowerCase().includes(q)
+    );
+  }, [reachableCustomers, customerSearchQuery]);
+
+  const handleToggleCustomer = (username: string) => {
+    setSelectedCustomerUsernames((prev) => {
+      const next = new Set(prev);
+      if (next.has(username)) {
+        next.delete(username);
+      } else {
+        next.add(username);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllFiltered = () => {
+    setSelectedCustomerUsernames((prev) => {
+      const next = new Set(prev);
+      filteredCustomerPickerList.forEach((c) => next.add(c.username));
+      return next;
+    });
+  };
+
+  const handleClearAllSelected = () => {
+    setSelectedCustomerUsernames(new Set());
+  };
+
   // Filtered recipients count
   const targetRecipients = useMemo(() => {
     if (audienceMode === 'single') {
       return isValidSmsPhone(singlePhone)
         ? [{ name: singleRecipientName || 'Customer', phone: singlePhone, username: 'custom', country: 'Malaysia', product: 'General' }]
         : [];
+    }
+    if (audienceMode === 'custom') {
+      return reachableCustomers.filter((c) => selectedCustomerUsernames.has(c.username));
     }
     if (audienceMode === 'state' && selectedState !== 'All') {
       return reachableCustomers.filter((c) => c.country === selectedState);
@@ -162,7 +204,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
       return reachableCustomers.filter((c) => c.product === selectedCategory);
     }
     return reachableCustomers;
-  }, [audienceMode, selectedState, selectedCategory, singlePhone, singleRecipientName, reachableCustomers]);
+  }, [audienceMode, selectedState, selectedCategory, singlePhone, singleRecipientName, reachableCustomers, selectedCustomerUsernames]);
 
   const targetCount = targetRecipients.length;
 
@@ -574,9 +616,10 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
               {[
-                { id: 'all', label: `Reachable (${reachableCustomers.length})` },
+                { id: 'all', label: `All Reachable (${reachableCustomers.length})` },
+                { id: 'custom', label: `Select Customers${selectedCustomerUsernames.size > 0 ? ` (${selectedCustomerUsernames.size})` : ''}` },
                 { id: 'state', label: 'Country' },
                 { id: 'category', label: 'By Product' },
                 { id: 'single', label: 'Single Recipient' },
@@ -585,7 +628,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
                   key={tab.id}
                   type="button"
                   onClick={() => setAudienceMode(tab.id as any)}
-                  className={`py-2 px-2.5 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center ${
+                  className={`py-2 px-2 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center ${
                     audienceMode === tab.id
                       ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
                       : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
@@ -595,6 +638,101 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
                 </button>
               ))}
             </div>
+
+            {/* Audience Custom Customer Picker */}
+            {audienceMode === 'custom' && (
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2.5">
+                {/* Search & Quick Action Toolbar */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="relative flex-1 min-w-[200px]">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={customerSearchQuery}
+                      onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                      placeholder="Search by name, username, phone, or country..."
+                      className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleSelectAllFiltered}
+                      className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-bold border border-blue-200 cursor-pointer transition-all active:scale-95"
+                    >
+                      Select All Filtered ({filteredCustomerPickerList.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearAllSelected}
+                      className="px-2.5 py-1 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 text-[11px] font-bold cursor-pointer transition-all active:scale-95"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+
+                {/* Selected Status Bar */}
+                <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600 px-1">
+                  <span>
+                    Showing {filteredCustomerPickerList.length} of {reachableCustomers.length} reachable buyers
+                  </span>
+                  <span className="font-extrabold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                    {selectedCustomerUsernames.size} Selected
+                  </span>
+                </div>
+
+                {/* Scrollable Customer List with Checkboxes */}
+                <div className="max-h-52 overflow-y-auto space-y-1.5 border border-slate-200 rounded-lg p-1.5 bg-white divide-y divide-slate-100">
+                  {filteredCustomerPickerList.length === 0 ? (
+                    <div className="text-center py-6 text-xs text-slate-400 font-medium">
+                      No matching customers found
+                    </div>
+                  ) : (
+                    filteredCustomerPickerList.map((cust) => {
+                      const isChecked = selectedCustomerUsernames.has(cust.username);
+                      return (
+                        <div
+                          key={cust.username}
+                          onClick={() => handleToggleCustomer(cust.username)}
+                          className={`flex items-center justify-between gap-2 p-2 rounded-lg cursor-pointer transition-all ${
+                            isChecked
+                              ? 'bg-blue-50/80 border border-blue-200 text-slate-900'
+                              : 'hover:bg-slate-50 text-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {}} // Handled by parent click
+                              className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer pointer-events-none"
+                            />
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 truncate">
+                                <span className="font-bold text-xs text-slate-900 truncate">{cust.name}</span>
+                                <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded shrink-0">
+                                  @{cust.username}
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-mono font-medium text-emerald-700 block">
+                                {cust.phone}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                              {cust.country || 'Malaysia'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Audience Filters */}
             {audienceMode === 'state' && (
