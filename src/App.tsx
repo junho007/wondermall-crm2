@@ -301,7 +301,7 @@ export default function App() {
         setActiveTab('overview');
       }
     } else if (userRole === 'cs') {
-      if (['financial', 'sms'].includes(activeTab)) {
+      if (['financial'].includes(activeTab)) {
         setActiveTab('overview');
       }
     } else if (userRole === 'marketing') {
