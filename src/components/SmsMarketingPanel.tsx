@@ -57,6 +57,8 @@ interface CustomTestRecipient {
   isValidPhone: boolean;
   isTest: boolean;
   orderCount: number;
+  lastOrderDate?: string;
+  lastOrderTimestamp?: number;
 }
 
 interface SmsLog {
@@ -176,9 +178,22 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
   const [logsPage, setLogsPage] = useState<number>(1);
   const [logsPageSize, setLogsPageSize] = useState<number>(10);
 
-  // Extract unique customers from orders with phone number detection and purchase count tracking
+  // Extract unique customers from orders with phone number detection, purchase count, and last order date tracking
   const customerList = useMemo(() => {
-    const map = new Map<string, { username: string; name: string; phone: string; country: string; product: string; isValidPhone: boolean; orderCount: number }>();
+    const map = new Map<
+      string,
+      {
+        username: string;
+        name: string;
+        phone: string;
+        country: string;
+        product: string;
+        isValidPhone: boolean;
+        orderCount: number;
+        lastOrderDate: string;
+        lastOrderTimestamp: number;
+      }
+    >();
 
     orders.forEach((o) => {
       const username = o.buyerUsername || 'buyer';
@@ -186,6 +201,8 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
       const isPhoneValid = isValidSmsPhone(rawPhone);
       const countryVal = o.country || 'Malaysia';
       const productVal = o.productName || o.productCategory || 'Digital Product';
+      const orderDateVal = o.orderDate || o.orderCreationDate || o.shipTime || '';
+      const orderTs = orderDateVal ? new Date(orderDateVal).getTime() || 0 : 0;
 
       if (!map.has(username)) {
         map.set(username, {
@@ -196,6 +213,8 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
           product: productVal,
           isValidPhone: isPhoneValid,
           orderCount: 1,
+          lastOrderDate: orderDateVal,
+          lastOrderTimestamp: orderTs,
         });
       } else {
         const existing = map.get(username)!;
@@ -204,14 +223,60 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
           existing.phone = rawPhone;
           existing.isValidPhone = true;
         }
+        if (orderTs > existing.lastOrderTimestamp || !existing.lastOrderDate) {
+          existing.lastOrderDate = orderDateVal;
+          existing.lastOrderTimestamp = orderTs;
+          if (productVal) {
+            existing.product = productVal;
+          }
+        }
       }
     });
 
-    return Array.from(map.values());
+    // Default sort by most recent order time descending so customer service sees latest buyers first
+    return Array.from(map.values()).sort((a, b) => b.lastOrderTimestamp - a.lastOrderTimestamp);
   }, [orders]);
 
   const reachableCustomers = useMemo(() => customerList.filter((c) => c.isValidPhone), [customerList]);
   const hiddenCustomersCount = customerList.length - reachableCustomers.length;
+
+  // Fast map to look up total SMS/WhatsApp outreach messages sent to each customer
+  const outreachCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    smsLogs.forEach((log) => {
+      const cleanPhone = (log.recipientPhone || '').replace(/[^\d]/g, '');
+      const recipientName = (log.recipientName || '').toLowerCase().trim();
+
+      if (cleanPhone) {
+        map.set(`phone:${cleanPhone}`, (map.get(`phone:${cleanPhone}`) || 0) + 1);
+        if (cleanPhone.startsWith('60')) {
+          const local0 = '0' + cleanPhone.substring(2);
+          map.set(`phone:${local0}`, (map.get(`phone:${local0}`) || 0) + 1);
+        } else if (cleanPhone.startsWith('0')) {
+          const intl60 = '60' + cleanPhone.substring(1);
+          map.set(`phone:${intl60}`, (map.get(`phone:${intl60}`) || 0) + 1);
+        }
+      }
+      if (recipientName) {
+        map.set(`name:${recipientName}`, (map.get(`name:${recipientName}`) || 0) + 1);
+      }
+    });
+    return map;
+  }, [smsLogs]);
+
+  const getCustomerOutreachCount = (phone?: string, name?: string, username?: string): number => {
+    const cleanPhone = (phone || '').replace(/[^\d]/g, '');
+    if (cleanPhone && outreachCountMap.has(`phone:${cleanPhone}`)) {
+      return outreachCountMap.get(`phone:${cleanPhone}`) || 0;
+    }
+    if (name && outreachCountMap.has(`name:${name.toLowerCase().trim()}`)) {
+      return outreachCountMap.get(`name:${name.toLowerCase().trim()}`) || 0;
+    }
+    if (username && outreachCountMap.has(`name:${username.toLowerCase().trim()}`)) {
+      return outreachCountMap.get(`name:${username.toLowerCase().trim()}`) || 0;
+    }
+    return 0;
+  };
 
   // Extract unique countries & available products
   const countriesList = useMemo(() => {
@@ -265,6 +330,8 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
       isValidPhone: true,
       isTest: true,
       orderCount: 0,
+      lastOrderDate: 'Custom Contact',
+      lastOrderTimestamp: Date.now(),
     };
 
     setCustomTestRecipients((prev) => [newTest, ...prev.filter((t) => t.phone !== cleanPhone)]);
@@ -285,10 +352,15 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
     });
   };
 
-  // Merged selectable recipients for custom picker with purchase count
+  // Merged selectable recipients for custom picker with purchase count and last order time
   const allSelectableRecipients = useMemo(() => {
     return [
-      ...customTestRecipients.map((t) => ({ ...t, orderCount: t.orderCount ?? 0 })),
+      ...customTestRecipients.map((t) => ({
+        ...t,
+        orderCount: t.orderCount ?? 0,
+        lastOrderDate: t.lastOrderDate || 'Custom Contact',
+        lastOrderTimestamp: t.lastOrderTimestamp || 0,
+      })),
       ...reachableCustomers,
     ];
   }, [customTestRecipients, reachableCustomers]);
@@ -381,7 +453,16 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
 
   // Filtered recipients calculation
   const targetRecipients = useMemo(() => {
-    let baseList: { name: string; phone: string; username: string; country: string; product: string }[] = [];
+    let baseList: {
+      name: string;
+      phone: string;
+      username: string;
+      country: string;
+      product: string;
+      lastOrderDate?: string;
+      lastOrderTimestamp?: number;
+      orderCount?: number;
+    }[] = [];
 
     if (audienceMode === 'custom') {
       return allSelectableRecipients.filter((c) => selectedCustomerUsernames.has(c.username));
@@ -411,14 +492,50 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
 
   const targetCount = targetRecipients.length;
 
+  // Sorting state for 1-Click WhatsApp Customer Outreach Queue
+  const [waSortField, setWaSortField] = useState<'name' | 'phone' | 'lastOrder' | 'country' | 'product' | 'messagesSent'>('lastOrder');
+  const [waSortDirection, setWaSortDirection] = useState<'asc' | 'desc'>('desc');
+
+  const handleWaSortToggle = (field: 'name' | 'phone' | 'lastOrder' | 'country' | 'product' | 'messagesSent') => {
+    if (waSortField === field) {
+      setWaSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setWaSortField(field);
+      setWaSortDirection(field === 'lastOrder' || field === 'messagesSent' ? 'desc' : 'asc');
+    }
+  };
+
+  // Sort target recipients based on selected column
+  const sortedTargetRecipients = useMemo(() => {
+    return [...targetRecipients].sort((a, b) => {
+      let cmp = 0;
+      if (waSortField === 'name') {
+        cmp = (a.name || a.username || '').localeCompare(b.name || b.username || '');
+      } else if (waSortField === 'phone') {
+        cmp = (a.phone || '').localeCompare(b.phone || '');
+      } else if (waSortField === 'lastOrder') {
+        cmp = (a.lastOrderTimestamp || 0) - (b.lastOrderTimestamp || 0);
+      } else if (waSortField === 'country') {
+        cmp = (a.country || '').localeCompare(b.country || '');
+      } else if (waSortField === 'product') {
+        cmp = (a.product || '').localeCompare(b.product || '');
+      } else if (waSortField === 'messagesSent') {
+        const countA = getCustomerOutreachCount(a.phone, a.name, a.username);
+        const countB = getCustomerOutreachCount(b.phone, b.name, b.username);
+        cmp = countA - countB;
+      }
+      return waSortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [targetRecipients, waSortField, waSortDirection, outreachCountMap]);
+
   // WhatsApp Queue Pagination Calculations
-  const totalWaRecords = targetRecipients.length;
+  const totalWaRecords = sortedTargetRecipients.length;
   const totalWaPages = Math.max(1, Math.ceil(totalWaRecords / waQueuePageSize));
   const waStartIndex = (waQueuePage - 1) * waQueuePageSize;
   const waEndIndex = Math.min(waStartIndex + waQueuePageSize, totalWaRecords);
   const paginatedWaRecipients = useMemo(() => {
-    return targetRecipients.slice(waStartIndex, waEndIndex);
-  }, [targetRecipients, waStartIndex, waEndIndex]);
+    return sortedTargetRecipients.slice(waStartIndex, waEndIndex);
+  }, [sortedTargetRecipients, waStartIndex, waEndIndex]);
 
   // Reset WhatsApp Queue Page whenever audience filters or total recipients count change
   useEffect(() => {
@@ -450,55 +567,103 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
     setMessageText(cleaned);
   };
 
-  // Fetch SMS & WhatsApp Logs & Saved API Settings
-  const fetchSmsLogsAndSettings = async () => {
-    setIsLoadingLogs(true);
+  // Two-Way Sync of SMS & WhatsApp Logs Across All CS Staff & Server KV
+  const fetchSmsLogsAndSettings = async (silent = false) => {
+    if (!silent) setIsLoadingLogs(true);
     try {
-      let backendLogs: SmsLog[] = [];
-      const res = await fetch('/api/send-sms');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.logs) backendLogs = data.logs;
-        if (data.settings) {
-          if (data.settings.apiKey && (!apiKey || apiKey.startsWith('3GnQOV'))) {
-            setApiKey(data.settings.apiKey);
-            localStorage.setItem('wm_movider_api_key', data.settings.apiKey);
+      // Gather local SMS logs and WhatsApp logs stored in this browser
+      let localSmsLogs: SmsLog[] = [];
+      let localWaLogs: SmsLog[] = [];
+      try {
+        localSmsLogs = JSON.parse(localStorage.getItem('wm_movider_sms_logs') || '[]');
+        localWaLogs = JSON.parse(localStorage.getItem('wm_whatsapp_logs') || '[]');
+      } catch (e) {}
+      const localCombined = [...localWaLogs, ...localSmsLogs];
+
+      let serverLogs: SmsLog[] = [];
+
+      // Step 1: Push client logs to server to merge into global backend store and KV
+      try {
+        const syncRes = await fetch('/api/send-sms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'sync_logs',
+            logs: localCombined,
+          }),
+        });
+        if (syncRes.ok) {
+          const syncData = await syncRes.json();
+          if (Array.isArray(syncData.logs)) {
+            serverLogs = syncData.logs;
           }
-          if (data.settings.apiSecret && (!apiSecret || apiSecret.startsWith('RENJe') || apiSecret.startsWith('vHVpO3g'))) {
-            setApiSecret(data.settings.apiSecret);
-            localStorage.setItem('wm_movider_api_secret', data.settings.apiSecret);
+        }
+      } catch (syncErr) {
+        console.warn('Sync logs POST notice:', syncErr);
+      }
+
+      // Step 2: Fallback GET if needed and load Movider credentials
+      if (!serverLogs || serverLogs.length === 0) {
+        const res = await fetch('/api/send-sms');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.logs)) serverLogs = data.logs;
+          if (data.settings) {
+            if (data.settings.apiKey && (!apiKey || apiKey.startsWith('3GnQOV'))) {
+              setApiKey(data.settings.apiKey);
+              localStorage.setItem('wm_movider_api_key', data.settings.apiKey);
+            }
+            if (data.settings.apiSecret && (!apiSecret || apiSecret.startsWith('RENJe') || apiSecret.startsWith('vHVpO3g'))) {
+              setApiSecret(data.settings.apiSecret);
+              localStorage.setItem('wm_movider_api_secret', data.settings.apiSecret);
+            }
+            localStorage.setItem('wm_movider_sender_id', 'WCGMall');
           }
-          localStorage.setItem('wm_movider_sender_id', 'WCGMall');
         }
       }
 
-      // Merge local SMS logs and WhatsApp logs with backend logs to prevent history loss
-      const localSmsLogs: SmsLog[] = JSON.parse(localStorage.getItem('wm_movider_sms_logs') || '[]');
-      const localWaLogs: SmsLog[] = JSON.parse(localStorage.getItem('wm_whatsapp_logs') || '[]');
-
+      // Merge all logs by ID or (phone + sentTime)
       const logMap = new Map<string, SmsLog>();
-      [...localWaLogs, ...localSmsLogs, ...backendLogs].forEach((l) => {
-        if (l && l.id) logMap.set(l.id, l);
+      [...localCombined, ...serverLogs].forEach((l) => {
+        if (l && l.id) {
+          logMap.set(l.id, l);
+        } else if (l && l.recipientPhone && l.sentTime) {
+          logMap.set(`${l.recipientPhone}_${l.sentTime}`, l);
+        }
       });
 
       const combined = Array.from(logMap.values()).sort(
-        (a, b) => new Date(b.sentTime).getTime() - new Date(a.sentTime).getTime()
+        (a, b) => new Date(b.sentTime || 0).getTime() - new Date(a.sentTime || 0).getTime()
       );
 
       setSmsLogs(combined);
 
-      // Persist combined SMS history back into browser localStorage
+      // Persist full synchronized logs into browser storage
+      const waOnlyLogs = combined.filter((x) => x.channel === 'WHATSAPP' || x.senderId === 'WHATSAPP_WEB');
       const smsOnlyLogs = combined.filter((x) => x.channel !== 'WHATSAPP' && x.senderId !== 'WHATSAPP_WEB');
+      localStorage.setItem('wm_whatsapp_logs', JSON.stringify(waOnlyLogs));
       localStorage.setItem('wm_movider_sms_logs', JSON.stringify(smsOnlyLogs));
+
+      if (!silent) {
+        setToastMessage(`✅ Synchronized ${combined.length} SMS & WhatsApp logs across all CS staff!`);
+        setTimeout(() => setToastMessage(null), 3500);
+      }
     } catch (err) {
-      console.warn('Failed to fetch SMS logs:', err);
+      console.warn('Failed to sync SMS logs:', err);
     } finally {
-      setIsLoadingLogs(false);
+      if (!silent) setIsLoadingLogs(false);
     }
   };
 
   useEffect(() => {
-    fetchSmsLogsAndSettings();
+    fetchSmsLogsAndSettings(true);
+
+    // Auto-sync every 25 seconds so all CS team members working simultaneously receive live updates
+    const interval = setInterval(() => {
+      fetchSmsLogsAndSettings(true);
+    }, 25000);
+
+    return () => clearInterval(interval);
   }, []);
 
   // Dynamic Template Variation Engine (Short, Plain Text, No Emojis for 1 SMS Segment)
@@ -582,6 +747,17 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
     localStorage.setItem('wm_whatsapp_logs', JSON.stringify(updatedWaLogs));
 
     setSmsLogs((prev) => [newLog, ...prev]);
+
+    // Broadcast outreach immediately to backend API so all CS staff receive it in real-time
+    fetch('/api/send-sms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'log_outreach',
+        log: newLog,
+      }),
+    }).catch((e) => console.warn('Failed to broadcast WhatsApp outreach to server:', e));
+
     setToastMessage(`💬 WhatsApp chat opened for ${recipient.name} (+${waPhone})!`);
     setTimeout(() => setToastMessage(null), 3500);
   };
@@ -1472,20 +1648,133 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200 sticky top-0 bg-slate-50">
-                <th className="py-2.5 px-3">Buyer Name</th>
-                <th className="py-2.5 px-3">Phone Number</th>
-                <th className="py-2.5 px-3">Country</th>
-                <th className="py-2.5 px-3">Product</th>
+              <tr className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200 sticky top-0 select-none">
+                <th className="py-2.5 px-3">
+                  <button
+                    type="button"
+                    onClick={() => handleWaSortToggle('name')}
+                    className="flex items-center gap-1.5 hover:text-emerald-700 transition-colors uppercase font-bold cursor-pointer"
+                    title="Click to sort by Buyer Customer Name"
+                  >
+                    <span>Buyer Customer</span>
+                    {waSortField === 'name' ? (
+                      waSortDirection === 'asc' ? (
+                        <ArrowUp className="w-3 h-3 text-emerald-600 shrink-0" />
+                      ) : (
+                        <ArrowDown className="w-3 h-3 text-emerald-600 shrink-0" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                    )}
+                  </button>
+                </th>
+                <th className="py-2.5 px-3">
+                  <button
+                    type="button"
+                    onClick={() => handleWaSortToggle('phone')}
+                    className="flex items-center gap-1.5 hover:text-emerald-700 transition-colors uppercase font-bold cursor-pointer"
+                    title="Click to sort by Phone Number"
+                  >
+                    <span>Phone Number</span>
+                    {waSortField === 'phone' ? (
+                      waSortDirection === 'asc' ? (
+                        <ArrowUp className="w-3 h-3 text-emerald-600 shrink-0" />
+                      ) : (
+                        <ArrowDown className="w-3 h-3 text-emerald-600 shrink-0" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                    )}
+                  </button>
+                </th>
+                <th className="py-2.5 px-3">
+                  <button
+                    type="button"
+                    onClick={() => handleWaSortToggle('lastOrder')}
+                    className="flex items-center gap-1.5 hover:text-emerald-700 transition-colors uppercase font-bold cursor-pointer"
+                    title="Click to sort by Last Order Time"
+                  >
+                    <span>Last Order Time</span>
+                    {waSortField === 'lastOrder' ? (
+                      waSortDirection === 'asc' ? (
+                        <ArrowUp className="w-3 h-3 text-emerald-600 shrink-0" />
+                      ) : (
+                        <ArrowDown className="w-3 h-3 text-emerald-600 shrink-0" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                    )}
+                  </button>
+                </th>
+                <th className="py-2.5 px-3">
+                  <button
+                    type="button"
+                    onClick={() => handleWaSortToggle('country')}
+                    className="flex items-center gap-1.5 hover:text-emerald-700 transition-colors uppercase font-bold cursor-pointer"
+                    title="Click to sort by Country"
+                  >
+                    <span>Country</span>
+                    {waSortField === 'country' ? (
+                      waSortDirection === 'asc' ? (
+                        <ArrowUp className="w-3 h-3 text-emerald-600 shrink-0" />
+                      ) : (
+                        <ArrowDown className="w-3 h-3 text-emerald-600 shrink-0" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                    )}
+                  </button>
+                </th>
+                <th className="py-2.5 px-3">
+                  <button
+                    type="button"
+                    onClick={() => handleWaSortToggle('product')}
+                    className="flex items-center gap-1.5 hover:text-emerald-700 transition-colors uppercase font-bold cursor-pointer"
+                    title="Click to sort by Product Name"
+                  >
+                    <span>Product Name</span>
+                    {waSortField === 'product' ? (
+                      waSortDirection === 'asc' ? (
+                        <ArrowUp className="w-3 h-3 text-emerald-600 shrink-0" />
+                      ) : (
+                        <ArrowDown className="w-3 h-3 text-emerald-600 shrink-0" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                    )}
+                  </button>
+                </th>
+                <th className="py-2.5 px-3 text-center">
+                  <button
+                    type="button"
+                    onClick={() => handleWaSortToggle('messagesSent')}
+                    className="flex items-center justify-center gap-1.5 w-full hover:text-emerald-700 transition-colors uppercase font-bold cursor-pointer"
+                    title="Click to sort by Messages Sent Count"
+                  >
+                    <span>Messages Sent</span>
+                    {waSortField === 'messagesSent' ? (
+                      waSortDirection === 'asc' ? (
+                        <ArrowUp className="w-3 h-3 text-emerald-600 shrink-0" />
+                      ) : (
+                        <ArrowDown className="w-3 h-3 text-emerald-600 shrink-0" />
+                      )
+                    ) : (
+                      <ArrowUpDown className="w-3 h-3 text-slate-400 opacity-60 shrink-0" />
+                    )}
+                  </button>
+                </th>
                 <th className="py-2.5 px-3 text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
               {paginatedWaRecipients.map((r, idx) => {
-                const waFormatted = formatWhatsAppPhone(r.phone);
+                const cleanDisplayPhone = (r.phone || '').replace(/^\+/, '').replace(/\s+/g, '');
+                const sentCount = getCustomerOutreachCount(r.phone, r.name, r.username);
+
                 return (
                   <tr key={idx} className="hover:bg-emerald-50/50 transition-colors group">
-                    <td className="py-2 px-3">
+                    {/* Buyer Customer */}
+                    <td className="py-2.5 px-3">
                       <button
                         type="button"
                         onClick={() => setSelectedProfileCustomer(r)}
@@ -1507,15 +1796,70 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                         </div>
                       </button>
                     </td>
-                    <td className="py-2 px-3 font-mono font-bold text-emerald-700">
-                      {r.phone} <span className="text-[10px] text-slate-400 font-normal">(+{waFormatted})</span>
+
+                    {/* Phone Number - Clean without bracket */}
+                    <td className="py-2.5 px-3 font-mono font-bold text-emerald-700 whitespace-nowrap">
+                      {cleanDisplayPhone || r.phone}
                     </td>
-                    <td className="py-2 px-3 text-slate-600">{r.country || 'Malaysia'}</td>
-                    <td className="py-2 px-3 text-slate-600">{r.product || 'Digital Product'}</td>
-                    <td className="py-2 px-3 text-right">
+
+                    {/* Last Order Time */}
+                    <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600 whitespace-nowrap">
+                      {r.lastOrderDate && r.lastOrderDate !== 'Custom Contact' ? (
+                        <div className="flex items-center gap-1.5" title={`Order timestamp: ${r.lastOrderDate}`}>
+                          <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span className="font-medium text-slate-700">{r.lastOrderDate}</span>
+                        </div>
+                      ) : r.lastOrderDate === 'Custom Contact' ? (
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                          Custom Contact
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 italic text-[10px]">-</span>
+                      )}
+                    </td>
+
+                    {/* Country */}
+                    <td className="py-2.5 px-3 text-slate-600 whitespace-nowrap">{r.country || 'Malaysia'}</td>
+
+                    {/* Shorter Product Column with Special Hover Tooltip */}
+                    <td className="py-2.5 px-3 max-w-[130px] sm:max-w-[150px] relative group/prod">
+                      <div className="font-medium text-slate-800 truncate cursor-pointer hover:text-emerald-700 transition-colors">
+                        {r.product || 'Digital Product'}
+                      </div>
+                      {/* Special Hover Preview Tooltip */}
+                      <div className="absolute left-0 bottom-full mb-1.5 z-50 hidden group-hover/prod:block w-72 sm:w-80 p-3 bg-white text-slate-900 text-xs rounded-xl shadow-2xl border border-slate-200/90 pointer-events-none leading-snug whitespace-normal ring-1 ring-slate-900/5">
+                        <div className="text-[10px] text-emerald-600 font-extrabold uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                          <ShoppingBag className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>FULL PRODUCT NAME</span>
+                        </div>
+                        <div className="font-bold text-slate-900 break-words leading-relaxed">
+                          {r.product || 'Digital Product'}
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Messages Sent Count */}
+                    <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                      {sentCount > 0 ? (
+                        <span
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-50 text-purple-700 border border-purple-200"
+                          title={`${sentCount} outreach message(s) dispatched to ${r.name}`}
+                        >
+                          <MessageSquare className="w-3 h-3 text-purple-600" />
+                          <span>{sentCount} Sent</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-400 border border-slate-200">
+                          0 Sent
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Action */}
+                    <td className="py-2.5 px-3 text-right whitespace-nowrap">
                       <button
                         onClick={() => handleLaunchWhatsAppChat(r)}
-                        className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold flex items-center gap-1.5 ml-auto cursor-pointer shadow-2xs transition-all active:scale-95"
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold inline-flex items-center gap-1.5 ml-auto cursor-pointer shadow-2xs transition-all active:scale-95"
                       >
                         <MessageCircle className="w-3.5 h-3.5" />
                         <span>Open WhatsApp</span>
@@ -1528,7 +1872,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
 
               {targetRecipients.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-6 text-center text-xs text-slate-400 italic">
+                  <td colSpan={7} className="py-8 text-center text-xs text-slate-400 italic">
                     No buyers matched the selected audience criteria.
                   </td>
                 </tr>
