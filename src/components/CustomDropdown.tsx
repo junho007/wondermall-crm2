@@ -103,7 +103,7 @@ export const CustomDropdown: React.FC<CustomDropdownProps> = ({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer select-none ${
+        className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer select-none ${
           isOpen
             ? 'bg-blue-50 border-blue-500 text-blue-900 ring-2 ring-blue-500/20'
             : isFilterActive
@@ -111,28 +111,32 @@ export const CustomDropdown: React.FC<CustomDropdownProps> = ({
             : 'bg-white border-slate-300 hover:border-slate-400 text-slate-700 hover:bg-slate-50'
         }`}
       >
-        {icon && <span className="text-blue-600 shrink-0">{icon}</span>}
-        {label && <span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider">{label}:</span>}
-        <span className="truncate max-w-[140px] text-slate-900 font-bold">{displayLabel}</span>
+        <div className="flex items-center gap-1.5 min-w-0">
+          {icon && <span className="text-blue-600 shrink-0">{icon}</span>}
+          {label && <span className="text-slate-500 font-bold uppercase text-[10px] tracking-wider shrink-0">{label}:</span>}
+          <span className="truncate text-slate-900 font-bold">{displayLabel}</span>
+        </div>
 
-        {isMulti && isFilterActive && (
-          <span className="px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-600 text-white">
-            {(selectedValues || []).filter((v) => v !== 'All' && v !== 'all').length}
-          </span>
-        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {isMulti && isFilterActive && (
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-600 text-white">
+              {(selectedValues || []).filter((v) => v !== 'All' && v !== 'all').length}
+            </span>
+          )}
 
-        <ChevronDown
-          className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 shrink-0 ${
-            isOpen ? 'rotate-180 text-blue-600' : ''
-          }`}
-        />
+          <ChevronDown
+            className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 shrink-0 ${
+              isOpen ? 'rotate-180 text-blue-600' : ''
+            }`}
+          />
+        </div>
       </button>
 
       {isOpen && (
         <div
           className={`absolute ${
             align === 'right' ? 'right-0' : 'left-0'
-          } mt-1.5 w-60 rounded-xl bg-white border border-slate-200 shadow-xl z-50 py-1.5 text-xs text-slate-800 max-h-72 overflow-y-auto animate-fadeIn`}
+          } mt-1.5 w-full min-w-[220px] max-w-sm rounded-xl bg-white border border-slate-200 shadow-xl z-50 py-1.5 text-xs text-slate-800 max-h-72 overflow-y-auto animate-fadeIn`}
         >
           {isMulti && (
             <div className="px-3 py-1.5 border-b border-slate-100 flex items-center justify-between text-[11px] font-bold text-slate-500">

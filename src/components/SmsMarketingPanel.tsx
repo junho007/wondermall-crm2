@@ -28,6 +28,11 @@ import {
   Trash2,
   FlaskConical,
   X,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  ShoppingBag,
+  RotateCcw,
 } from 'lucide-react';
 import { ShopeeOrder } from '../types';
 import { isValidSmsPhone } from '../utils/csvHelper';
@@ -46,6 +51,7 @@ interface CustomTestRecipient {
   product: string;
   isValidPhone: boolean;
   isTest: boolean;
+  orderCount: number;
 }
 
 interface SmsLog {
@@ -99,10 +105,8 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
   // Marketing Channel Selection - default to 'sms' so SMS blast sends real SMS
   const [dispatchChannel, setDispatchChannel] = useState<'sms' | 'whatsapp' | 'both'>('sms');
 
-  // Audience & Composition State
-  const [audienceMode, setAudienceMode] = useState<'all' | 'custom' | 'segment'>('all');
-  const [selectedState, setSelectedState] = useState<string>('All');
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  // Audience & Composition State (All Reachable vs Select Customers Directory)
+  const [audienceMode, setAudienceMode] = useState<'all' | 'custom'>('all');
   const [selectedCustomerUsernames, setSelectedCustomerUsernames] = useState<Set<string>>(new Set());
   const [customerSearchQuery, setCustomerSearchQuery] = useState<string>('');
 
@@ -140,9 +144,9 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
   const [searchLogQuery, setSearchLogQuery] = useState<string>('');
   const [channelFilter, setChannelFilter] = useState<'ALL' | 'SMS' | 'WHATSAPP'>('ALL');
 
-  // Extract unique customers from orders with phone number detection
+  // Extract unique customers from orders with phone number detection and purchase count tracking
   const customerList = useMemo(() => {
-    const map = new Map<string, { username: string; name: string; phone: string; country: string; product: string; isValidPhone: boolean }>();
+    const map = new Map<string, { username: string; name: string; phone: string; country: string; product: string; isValidPhone: boolean; orderCount: number }>();
 
     orders.forEach((o) => {
       const username = o.buyerUsername || 'buyer';
@@ -159,9 +163,11 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
           country: countryVal,
           product: productVal,
           isValidPhone: isPhoneValid,
+          orderCount: 1,
         });
       } else {
         const existing = map.get(username)!;
+        existing.orderCount += 1;
         if (!existing.isValidPhone && isPhoneValid) {
           existing.phone = rawPhone;
           existing.isValidPhone = true;
@@ -185,6 +191,12 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
     const set = new Set(orders.map((o) => o.productName).filter(Boolean));
     return ['All', ...Array.from(set)];
   }, [orders]);
+
+  // Directory Table Filters & Sorting state
+  const [dirCountryFilter, setDirCountryFilter] = useState<string>('All');
+  const [dirProductFilter, setDirProductFilter] = useState<string>('All');
+  const [dirSortField, setDirSortField] = useState<'name' | 'orderCount' | 'phone' | 'country' | 'product'>('orderCount');
+  const [dirSortDirection, setDirSortDirection] = useState<'asc' | 'desc'>('desc');
 
   // Handle adding custom mobile numbers
   const handleAddTestRecipient = (e?: React.FormEvent) => {
@@ -222,6 +234,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
       product: 'Added Mobile Number',
       isValidPhone: true,
       isTest: true,
+      orderCount: 0,
     };
 
     setCustomTestRecipients((prev) => [newTest, ...prev.filter((t) => t.phone !== cleanPhone)]);
@@ -242,24 +255,75 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
     });
   };
 
-  // Merged selectable recipients for custom picker
+  // Merged selectable recipients for custom picker with purchase count
   const allSelectableRecipients = useMemo(() => {
-    return [...customTestRecipients, ...reachableCustomers];
+    return [
+      ...customTestRecipients.map((t) => ({ ...t, orderCount: t.orderCount ?? 0 })),
+      ...reachableCustomers,
+    ];
   }, [customTestRecipients, reachableCustomers]);
 
-  // Filtered customer picker list for custom selection
+  // Filtered and Sorted customer picker list for custom selection table
   const filteredCustomerPickerList = useMemo(() => {
-    if (!customerSearchQuery.trim()) return allSelectableRecipients;
-    const q = customerSearchQuery.toLowerCase();
-    return allSelectableRecipients.filter(
-      (c) =>
-        c.name.toLowerCase().includes(q) ||
-        c.username.toLowerCase().includes(q) ||
-        c.phone.includes(q) ||
-        c.country.toLowerCase().includes(q) ||
-        ('isTest' in c && (c as any).isTest && 'added mobile number'.includes(q))
-    );
-  }, [allSelectableRecipients, customerSearchQuery]);
+    let list = allSelectableRecipients;
+
+    // Filter by search keyword
+    if (customerSearchQuery.trim()) {
+      const q = customerSearchQuery.toLowerCase();
+      list = list.filter(
+        (c) =>
+          c.name.toLowerCase().includes(q) ||
+          c.username.toLowerCase().includes(q) ||
+          c.phone.includes(q) ||
+          c.country.toLowerCase().includes(q) ||
+          c.product.toLowerCase().includes(q) ||
+          ('isTest' in c && (c as any).isTest && 'added mobile number'.includes(q))
+      );
+    }
+
+    // Filter by Country dropdown
+    if (dirCountryFilter !== 'All') {
+      list = list.filter((c) => c.country === dirCountryFilter);
+    }
+
+    // Filter by Product dropdown
+    if (dirProductFilter !== 'All') {
+      list = list.filter((c) => c.product === dirProductFilter);
+    }
+
+    // Sort list
+    return [...list].sort((a, b) => {
+      let cmp = 0;
+      if (dirSortField === 'orderCount') {
+        cmp = (a.orderCount || 0) - (b.orderCount || 0);
+      } else if (dirSortField === 'name') {
+        cmp = a.name.localeCompare(b.name);
+      } else if (dirSortField === 'phone') {
+        cmp = a.phone.localeCompare(b.phone);
+      } else if (dirSortField === 'country') {
+        cmp = (a.country || '').localeCompare(b.country || '');
+      } else if (dirSortField === 'product') {
+        cmp = (a.product || '').localeCompare(b.product || '');
+      }
+      return dirSortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [
+    allSelectableRecipients,
+    customerSearchQuery,
+    dirCountryFilter,
+    dirProductFilter,
+    dirSortField,
+    dirSortDirection,
+  ]);
+
+  const handleSortToggle = (field: 'name' | 'orderCount' | 'phone' | 'country' | 'product') => {
+    if (dirSortField === field) {
+      setDirSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setDirSortField(field);
+      setDirSortDirection(field === 'orderCount' ? 'desc' : 'asc');
+    }
+  };
 
   const handleToggleCustomer = (username: string) => {
     setSelectedCustomerUsernames((prev) => {
@@ -285,7 +349,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
     setSelectedCustomerUsernames(new Set());
   };
 
-  // Filtered recipients count
+  // Filtered recipients calculation
   const targetRecipients = useMemo(() => {
     let baseList: { name: string; phone: string; username: string; country: string; product: string }[] = [];
 
@@ -293,18 +357,10 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
       return allSelectableRecipients.filter((c) => selectedCustomerUsernames.has(c.username));
     }
 
-    if (audienceMode === 'segment') {
-      baseList = reachableCustomers.filter((c) => {
-        const matchCountry = selectedState === 'All' || c.country === selectedState;
-        const matchProduct = selectedCategory === 'All' || c.product === selectedCategory;
-        return matchCountry && matchProduct;
-      });
-    } else {
-      // audienceMode === 'all'
-      baseList = reachableCustomers;
-    }
+    // audienceMode === 'all'
+    baseList = reachableCustomers;
 
-    // In bulk modes ('all' or 'segment'), if added mobile numbers are enabled, include them automatically
+    // In bulk 'all' mode, if added mobile numbers are enabled, include them automatically
     if (includeTestNumbersInBulk && customTestRecipients.length > 0) {
       const existingPhones = new Set(baseList.map((b) => b.phone.replace(/[^\d]/g, '')));
       const testToAdd = customTestRecipients.filter(
@@ -316,8 +372,6 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
     return baseList;
   }, [
     audienceMode,
-    selectedState,
-    selectedCategory,
     reachableCustomers,
     allSelectableRecipients,
     selectedCustomerUsernames,
@@ -549,13 +603,17 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
     setIsSending(true);
 
     try {
-      const batchList = targetRecipients.slice(0, 5);
+      const batchList = targetRecipients;
       let lastSmsError: string | null = null;
+      let successCount = 0;
 
       if (dispatchChannel === 'sms' || dispatchChannel === 'both') {
-        setToastMessage('⏳ Dispatching SMS via Movider Gateway...');
+        setToastMessage(`⏳ Dispatching SMS to ${batchList.length} recipient(s)...`);
 
-        for (const recipient of batchList) {
+        for (let i = 0; i < batchList.length; i++) {
+          const recipient = batchList[i];
+          setToastMessage(`⏳ Sending SMS ${i + 1} of ${batchList.length} to ${recipient.name}...`);
+
           const personalizedMsg = messageText.replace(/\{buyerName\}/g, recipient.name || recipient.username || 'Customer');
 
           const response = await fetch('/api/send-sms', {
@@ -576,6 +634,13 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
           const data = await response.json();
           if (data.log?.errorMessage) {
             lastSmsError = data.log.errorMessage;
+          } else if (data.success) {
+            successCount += 1;
+          }
+
+          // 200ms pacing between consecutive messages to prevent telco spam-rate throttling
+          if (i < batchList.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, 200));
           }
         }
       }
@@ -588,10 +653,10 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
         }
       }
 
-      if (lastSmsError) {
+      if (lastSmsError && successCount === 0) {
         setToastMessage(`❌ SMS Failed: ${lastSmsError}`);
       } else {
-        setToastMessage(`✅ Campaign dispatched successfully via ${dispatchChannel.toUpperCase()}!`);
+        setToastMessage(`✅ Successfully dispatched campaign to ${batchList.length} recipient(s)!`);
       }
       fetchSmsLogsAndSettings();
     } catch (err) {
@@ -738,17 +803,16 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {[
                 { id: 'all', label: `All Reachable (${reachableCustomers.length})` },
                 { id: 'custom', label: `Select Customers${selectedCustomerUsernames.size > 0 ? ` (${selectedCustomerUsernames.size})` : ''}` },
-                { id: 'segment', label: 'Country & Product Filters' },
               ].map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   onClick={() => setAudienceMode(tab.id as any)}
-                  className={`py-2 px-2.5 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center ${
+                  className={`py-2 px-3 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center ${
                     audienceMode === tab.id
                       ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
                       : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
@@ -759,79 +823,8 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
               ))}
             </div>
 
-            {/* Audience Combined Filters (Country & Product in 1 Section with 2 Dropdowns) */}
-            {audienceMode === 'segment' && (
-              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-800 uppercase tracking-wider">
-                    <Filter className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Filter By Segment (Country &amp; Product)</span>
-                  </div>
-                  {(selectedState !== 'All' || selectedCategory !== 'All') && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedState('All');
-                        setSelectedCategory('All');
-                      }}
-                      className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
-                    >
-                      Reset Both Filters
-                    </button>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Dropdown 1: Country */}
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-bold uppercase text-slate-500">
-                      1. Select Country
-                    </label>
-                    <CustomDropdown
-                      options={countriesList.map((c) => ({
-                        value: c,
-                        label: c === 'All' ? 'All Countries (Any)' : c,
-                      }))}
-                      value={selectedState}
-                      onChange={setSelectedState}
-                    />
-                  </div>
-
-                  {/* Dropdown 2: Product */}
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-bold uppercase text-slate-500">
-                      2. Select Product
-                    </label>
-                    <CustomDropdown
-                      options={productsList.map((p) => ({
-                        value: p,
-                        label: p === 'All' ? 'All Products (Any)' : p,
-                      }))}
-                      value={selectedCategory}
-                      onChange={setSelectedCategory}
-                    />
-                  </div>
-                </div>
-
-                {/* Filter result status */}
-                <div className="text-[11px] text-slate-600 font-semibold bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between">
-                  <span>Matching segment criteria:</span>
-                  <span className="font-extrabold text-slate-900 font-mono">
-                    {
-                      reachableCustomers.filter((c) => {
-                        const matchCountry = selectedState === 'All' || c.country === selectedState;
-                        const matchProduct = selectedCategory === 'All' || c.product === selectedCategory;
-                        return matchCountry && matchProduct;
-                      }).length
-                    }{' '}
-                    Reachable Customers
-                  </span>
-                </div>
-              </div>
-            )}
-
             {/* Quick Added Number inclusion checkbox for bulk blasts */}
-            {(audienceMode === 'all' || audienceMode === 'segment') && customTestRecipients.length > 0 && (
+            {audienceMode === 'all' && customTestRecipients.length > 0 && (
               <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-50/80 border border-emerald-200 text-xs">
                 <label className="flex items-center gap-2 cursor-pointer select-none font-bold text-emerald-900">
                   <input
@@ -979,7 +972,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
           </div>
         </div>
 
-        {/* Right Column: Custom Customer Directory (if Select Customers active) OR Live Mobile Preview (if other modes) */}
+        {/* Right Column: Custom Customer Directory Table (if Select Customers active) OR Live Mobile Preview (if other modes) */}
         {audienceMode === 'custom' ? (
           <div className="lg:col-span-7 bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-3.5 flex flex-col justify-between">
             <div className="space-y-3">
@@ -1001,45 +994,106 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
                 </div>
               </div>
 
-              {/* Search & Actions Toolbar */}
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="relative flex-1 min-w-[200px]">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={customerSearchQuery}
-                    onChange={(e) => setCustomerSearchQuery(e.target.value)}
-                    placeholder="Search by name, phone, country, or username..."
-                    className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-50 border border-slate-300 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white"
-                  />
+              {/* Filter By Segment (Country & Product) Toolbar */}
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                    <Filter className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Filter By Segment (Country &amp; Product)</span>
+                  </div>
+                  {(dirCountryFilter !== 'All' || dirProductFilter !== 'All' || customerSearchQuery.trim()) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDirCountryFilter('All');
+                        setDirProductFilter('All');
+                        setCustomerSearchQuery('');
+                      }}
+                      className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer flex items-center gap-1"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Reset Both Filters</span>
+                    </button>
+                  )}
                 </div>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => setIsAddingTestNumber(!isAddingTestNumber)}
-                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold border cursor-pointer transition-all active:scale-95 flex items-center gap-1 ${
-                      isAddingTestNumber
-                        ? 'bg-emerald-600 text-white border-emerald-600'
-                        : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
-                    }`}
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add Number</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSelectAllFiltered}
-                    className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-bold border border-blue-200 cursor-pointer transition-all active:scale-95"
-                  >
-                    Select All ({filteredCustomerPickerList.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleClearAllSelected}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold cursor-pointer transition-all active:scale-95"
-                  >
-                    Clear
-                  </button>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Dropdown 1: Country */}
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold uppercase text-slate-500">
+                      1. Select Country
+                    </label>
+                    <CustomDropdown
+                      options={countriesList.map((c) => ({
+                        value: c,
+                        label: c === 'All' ? 'All Countries (Any)' : c,
+                      }))}
+                      value={dirCountryFilter}
+                      onChange={setDirCountryFilter}
+                      className="w-full"
+                    />
+                  </div>
+
+                  {/* Dropdown 2: Product */}
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold uppercase text-slate-500">
+                      2. Select Product
+                    </label>
+                    <CustomDropdown
+                      options={productsList.map((p) => ({
+                        value: p,
+                        label: p === 'All' ? 'All Products (Any)' : p,
+                      }))}
+                      value={dirProductFilter}
+                      onChange={setDirProductFilter}
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+
+                {/* Search & Actions Toolbar */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200/70">
+                  <div className="relative flex-1 min-w-[200px]">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={customerSearchQuery}
+                      onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                      placeholder="Search by name, phone, country, or username..."
+                      className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingTestNumber(!isAddingTestNumber)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold border cursor-pointer transition-all active:scale-95 flex items-center gap-1 ${
+                        isAddingTestNumber
+                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+                      }`}
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Number</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleSelectAllFiltered}
+                      className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-bold border border-blue-200 cursor-pointer transition-all active:scale-95"
+                    >
+                      Select All ({filteredCustomerPickerList.length})
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleClearAllSelected}
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold cursor-pointer transition-all active:scale-95"
+                    >
+                      Clear
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1104,79 +1158,155 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
                 </div>
               )}
 
-              {/* Spacious, Tall Customer Directory List */}
-              <div className="h-[480px] max-h-[520px] overflow-y-auto space-y-1.5 border border-slate-200 rounded-xl p-2 bg-slate-50/50 divide-y divide-slate-100">
-                {filteredCustomerPickerList.length === 0 ? (
-                  <div className="text-center py-16 text-xs text-slate-400 font-medium">
-                    No matching recipients found
-                  </div>
-                ) : (
-                  filteredCustomerPickerList.map((cust) => {
-                    const isChecked = selectedCustomerUsernames.has(cust.username);
-                    const isTest = 'isTest' in cust && (cust as any).isTest;
-
-                    return (
-                      <div
-                        key={cust.username}
-                        onClick={() => handleToggleCustomer(cust.username)}
-                        className={`flex items-center justify-between gap-2 p-2 rounded-lg cursor-pointer transition-all ${
-                          isChecked
-                            ? isTest
-                              ? 'bg-emerald-50 border border-emerald-300 text-slate-900 shadow-2xs'
-                              : 'bg-blue-50/90 border border-blue-200 text-slate-900 shadow-2xs'
-                            : 'bg-white hover:bg-slate-100/80 text-slate-700 border border-transparent'
-                        }`}
+              {/* Recipients Directory Table */}
+              <div className="h-[460px] max-h-[500px] overflow-y-auto border border-slate-200 rounded-xl bg-white shadow-2xs">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="sticky top-0 bg-slate-100/95 backdrop-blur-xs text-slate-600 font-bold uppercase text-[10px] border-b border-slate-200 z-10 select-none">
+                    <tr>
+                      <th className="py-2.5 px-3 w-10 text-center">
+                        <input
+                          type="checkbox"
+                          checked={
+                            filteredCustomerPickerList.length > 0 &&
+                            filteredCustomerPickerList.every((c) => selectedCustomerUsernames.has(c.username))
+                          }
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              handleSelectAllFiltered();
+                            } else {
+                              handleClearAllSelected();
+                            }
+                          }}
+                          className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer"
+                        />
+                      </th>
+                      <th
+                        onClick={() => handleSortToggle('name')}
+                        className="py-2.5 px-3 cursor-pointer hover:bg-slate-200/70 transition-colors"
                       >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => {}} // Handled by parent click
-                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer pointer-events-none"
-                          />
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 truncate">
-                              <span className="font-bold text-xs text-slate-900 truncate">{cust.name}</span>
-                              {isTest ? (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shrink-0">
-                                  <span>Added Mobile Number</span>
-                                </span>
-                              ) : (
-                                <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded shrink-0">
-                                  @{cust.username}
-                                </span>
-                              )}
-                            </div>
-                            <span className="text-[11px] font-mono font-medium text-emerald-700 block">
-                              {cust.phone}
-                            </span>
-                          </div>
+                        <div className="flex items-center gap-1">
+                          <span>Buyer / Contact</span>
+                          {dirSortField === 'name' ? (
+                            dirSortDirection === 'asc' ? (
+                              <ArrowUp className="w-3 h-3 text-blue-600" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3 text-blue-600" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                          )}
                         </div>
+                      </th>
+                      <th
+                        onClick={() => handleSortToggle('orderCount')}
+                        className="py-2.5 px-3 cursor-pointer hover:bg-slate-200/70 transition-colors"
+                      >
+                        <div className="flex items-center gap-1">
+                          <span>Purchases</span>
+                          {dirSortField === 'orderCount' ? (
+                            dirSortDirection === 'asc' ? (
+                              <ArrowUp className="w-3 h-3 text-blue-600" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3 text-blue-600" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        onClick={() => handleSortToggle('country')}
+                        className="py-2.5 px-3 cursor-pointer hover:bg-slate-200/70 transition-colors"
+                      >
+                        <div className="flex items-center gap-1">
+                          <span>Country</span>
+                          {dirSortField === 'country' ? (
+                            dirSortDirection === 'asc' ? (
+                              <ArrowUp className="w-3 h-3 text-blue-600" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3 text-blue-600" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                          )}
+                        </div>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-medium">
+                    {filteredCustomerPickerList.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="py-16 text-center text-xs text-slate-400 italic">
+                          No matching recipients found. Try clearing your filters or search term.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredCustomerPickerList.map((cust) => {
+                        const isChecked = selectedCustomerUsernames.has(cust.username);
+                        const isTest = 'isTest' in cust && (cust as any).isTest;
 
-                        <div className="flex items-center gap-2 shrink-0">
-                          {!isTest && (
-                            <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-                              {cust.country || 'Malaysia'}
-                            </span>
-                          )}
-                          {isTest && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteTestRecipient((cust as any).id, cust.username);
-                              }}
-                              className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded cursor-pointer transition-colors"
-                              title="Remove added number"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
+                        return (
+                          <tr
+                            key={cust.username}
+                            onClick={() => handleToggleCustomer(cust.username)}
+                            className={`cursor-pointer transition-colors ${
+                              isChecked
+                                ? isTest
+                                  ? 'bg-emerald-50/80 hover:bg-emerald-100/70 text-slate-900'
+                                  : 'bg-blue-50/80 hover:bg-blue-100/70 text-slate-900'
+                                : 'hover:bg-slate-50/90 text-slate-700'
+                            }`}
+                          >
+                            {/* Checkbox Column */}
+                            <td className="py-2.5 px-3 w-10 text-center" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => handleToggleCustomer(cust.username)}
+                                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer"
+                              />
+                            </td>
+
+                            {/* Buyer Name, Username & Phone Number (styled like before / image.png) */}
+                            <td className="py-2.5 px-3">
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-bold text-xs text-slate-900">{cust.name}</span>
+                                  {isTest ? (
+                                    <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 shrink-0">
+                                      Added Mobile Number
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded shrink-0">
+                                      @{cust.username}
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-xs font-mono font-medium text-emerald-700 block">
+                                  {cust.phone}
+                                </span>
+                              </div>
+                            </td>
+
+                            {/* Purchases: Clean number 1/2/3 (no box, no icon, no order text) */}
+                            <td className="py-2.5 px-3">
+                              <span className="font-bold text-xs text-slate-800">
+                                {isTest ? '—' : cust.orderCount || 1}
+                              </span>
+                            </td>
+
+                            {/* Country: Just country */}
+                            <td className="py-2.5 px-3">
+                              <span className="text-xs font-medium text-slate-700">
+                                {cust.country || 'Malaysia'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 
