@@ -24,6 +24,10 @@ import {
   Zap,
   Copy,
   Share2,
+  Plus,
+  Trash2,
+  FlaskConical,
+  X,
 } from 'lucide-react';
 import { ShopeeOrder } from '../types';
 import { isValidSmsPhone } from '../utils/csvHelper';
@@ -31,6 +35,17 @@ import { CustomDropdown, OptionItem } from './CustomDropdown';
 
 interface SmsMarketingPanelProps {
   orders: ShopeeOrder[];
+}
+
+interface CustomTestRecipient {
+  id: string;
+  name: string;
+  phone: string;
+  username: string;
+  country: string;
+  product: string;
+  isValidPhone: boolean;
+  isTest: boolean;
 }
 
 interface SmsLog {
@@ -85,13 +100,34 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
   const [dispatchChannel, setDispatchChannel] = useState<'sms' | 'whatsapp' | 'both'>('sms');
 
   // Audience & Composition State
-  const [audienceMode, setAudienceMode] = useState<'all' | 'custom' | 'state' | 'category' | 'single'>('all');
+  const [audienceMode, setAudienceMode] = useState<'all' | 'custom' | 'segment'>('all');
   const [selectedState, setSelectedState] = useState<string>('All');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
-  const [singlePhone, setSinglePhone] = useState<string>('');
-  const [singleRecipientName, setSingleRecipientName] = useState<string>('');
   const [selectedCustomerUsernames, setSelectedCustomerUsernames] = useState<Set<string>>(new Set());
   const [customerSearchQuery, setCustomerSearchQuery] = useState<string>('');
+
+  // Added Custom Mobile Numbers State
+  const [customTestRecipients, setCustomTestRecipients] = useState<CustomTestRecipient[]>(() => {
+    try {
+      const saved = localStorage.getItem('wm_custom_test_recipients');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.error('Failed to load custom recipients', e);
+    }
+    return [];
+  });
+  const [newTestName, setNewTestName] = useState<string>('');
+  const [newTestPhone, setNewTestPhone] = useState<string>('');
+  const [isAddingTestNumber, setIsAddingTestNumber] = useState<boolean>(false);
+  const [includeTestNumbersInBulk, setIncludeTestNumbersInBulk] = useState<boolean>(true);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('wm_custom_test_recipients', JSON.stringify(customTestRecipients));
+    } catch (e) {
+      console.error('Failed to save custom recipients', e);
+    }
+  }, [customTestRecipients]);
 
   const [messageText, setMessageText] = useState<string>(
     'Hi {buyerName}! Thank you for ordering from WCGMall on Shopee. Your voucher code is ready in your chat!'
@@ -150,18 +186,80 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
     return ['All', ...Array.from(set)];
   }, [orders]);
 
+  // Handle adding custom mobile numbers
+  const handleAddTestRecipient = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const trimmedPhone = newTestPhone.trim();
+    const trimmedName = newTestName.trim() || 'Added Contact';
+
+    if (!trimmedPhone) {
+      setToastMessage('⚠️ Please enter a mobile phone number.');
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
+
+    if (!isValidSmsPhone(trimmedPhone)) {
+      setToastMessage('⚠️ Invalid mobile number format. Please use e.g. 0123456789 or +60123456789');
+      setTimeout(() => setToastMessage(null), 3500);
+      return;
+    }
+
+    let cleanPhone = trimmedPhone;
+    if (cleanPhone.startsWith('0')) {
+      cleanPhone = '+60' + cleanPhone.substring(1);
+    } else if (!cleanPhone.startsWith('+') && cleanPhone.startsWith('60')) {
+      cleanPhone = '+' + cleanPhone;
+    }
+
+    const testId = `custom_${Date.now()}`;
+    const testUsername = `custom_${cleanPhone.replace(/[^\d]/g, '')}`;
+    const newTest: CustomTestRecipient = {
+      id: testId,
+      name: trimmedName,
+      phone: cleanPhone,
+      username: testUsername,
+      country: 'Malaysia',
+      product: 'Added Mobile Number',
+      isValidPhone: true,
+      isTest: true,
+    };
+
+    setCustomTestRecipients((prev) => [newTest, ...prev.filter((t) => t.phone !== cleanPhone)]);
+    setSelectedCustomerUsernames((prev) => new Set(prev).add(testUsername));
+    setNewTestName('');
+    setNewTestPhone('');
+    setIsAddingTestNumber(false);
+    setToastMessage(`✅ Added mobile number: ${trimmedName} (${cleanPhone})`);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const handleDeleteTestRecipient = (id: string, username: string) => {
+    setCustomTestRecipients((prev) => prev.filter((p) => p.id !== id));
+    setSelectedCustomerUsernames((prev) => {
+      const next = new Set(prev);
+      next.delete(username);
+      return next;
+    });
+  };
+
+  // Merged selectable recipients for custom picker
+  const allSelectableRecipients = useMemo(() => {
+    return [...customTestRecipients, ...reachableCustomers];
+  }, [customTestRecipients, reachableCustomers]);
+
   // Filtered customer picker list for custom selection
   const filteredCustomerPickerList = useMemo(() => {
-    if (!customerSearchQuery.trim()) return reachableCustomers;
+    if (!customerSearchQuery.trim()) return allSelectableRecipients;
     const q = customerSearchQuery.toLowerCase();
-    return reachableCustomers.filter(
+    return allSelectableRecipients.filter(
       (c) =>
         c.name.toLowerCase().includes(q) ||
         c.username.toLowerCase().includes(q) ||
         c.phone.includes(q) ||
-        c.country.toLowerCase().includes(q)
+        c.country.toLowerCase().includes(q) ||
+        ('isTest' in c && (c as any).isTest && 'added mobile number'.includes(q))
     );
-  }, [reachableCustomers, customerSearchQuery]);
+  }, [allSelectableRecipients, customerSearchQuery]);
 
   const handleToggleCustomer = (username: string) => {
     setSelectedCustomerUsernames((prev) => {
@@ -189,22 +287,43 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
 
   // Filtered recipients count
   const targetRecipients = useMemo(() => {
-    if (audienceMode === 'single') {
-      return isValidSmsPhone(singlePhone)
-        ? [{ name: singleRecipientName || 'Customer', phone: singlePhone, username: 'custom', country: 'Malaysia', product: 'General' }]
-        : [];
-    }
+    let baseList: { name: string; phone: string; username: string; country: string; product: string }[] = [];
+
     if (audienceMode === 'custom') {
-      return reachableCustomers.filter((c) => selectedCustomerUsernames.has(c.username));
+      return allSelectableRecipients.filter((c) => selectedCustomerUsernames.has(c.username));
     }
-    if (audienceMode === 'state' && selectedState !== 'All') {
-      return reachableCustomers.filter((c) => c.country === selectedState);
+
+    if (audienceMode === 'segment') {
+      baseList = reachableCustomers.filter((c) => {
+        const matchCountry = selectedState === 'All' || c.country === selectedState;
+        const matchProduct = selectedCategory === 'All' || c.product === selectedCategory;
+        return matchCountry && matchProduct;
+      });
+    } else {
+      // audienceMode === 'all'
+      baseList = reachableCustomers;
     }
-    if (audienceMode === 'category' && selectedCategory !== 'All') {
-      return reachableCustomers.filter((c) => c.product === selectedCategory);
+
+    // In bulk modes ('all' or 'segment'), if added mobile numbers are enabled, include them automatically
+    if (includeTestNumbersInBulk && customTestRecipients.length > 0) {
+      const existingPhones = new Set(baseList.map((b) => b.phone.replace(/[^\d]/g, '')));
+      const testToAdd = customTestRecipients.filter(
+        (t) => !existingPhones.has(t.phone.replace(/[^\d]/g, ''))
+      );
+      return [...testToAdd, ...baseList];
     }
-    return reachableCustomers;
-  }, [audienceMode, selectedState, selectedCategory, singlePhone, singleRecipientName, reachableCustomers, selectedCustomerUsernames]);
+
+    return baseList;
+  }, [
+    audienceMode,
+    selectedState,
+    selectedCategory,
+    reachableCustomers,
+    allSelectableRecipients,
+    selectedCustomerUsernames,
+    includeTestNumbersInBulk,
+    customTestRecipients,
+  ]);
 
   const targetCount = targetRecipients.length;
 
@@ -506,7 +625,10 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
 
   // First recipient for live preview
   const previewRecipient = targetRecipients[0] || { name: 'Ahmad Rizal', phone: '+60123456789' };
-  const previewMessage = messageText.replace(/\{buyerName\}/g, previewRecipient.name);
+  const rawPersonalized = messageText.replace(/\{buyerName\}/g, previewRecipient.name);
+  const previewMessage = rawPersonalized.trim().startsWith('RM0 WCGMall') || rawPersonalized.trim().startsWith('RM0.00 WCGMall')
+    ? rawPersonalized
+    : `RM0 WCGMall: ${rawPersonalized}`;
 
   return (
     <div className="space-y-6 w-full animate-fade-in">
@@ -546,10 +668,10 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
         </div>
       )}
 
-      {/* Main Grid: Campaign Composer (2 Cols) & Live Mobile Preview (1 Col) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Main Grid: Responsive 12-Column Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left Column: Campaign Composer */}
-        <div className="lg:col-span-2 bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-4">
+        <div className={`${audienceMode === 'custom' ? 'lg:col-span-5' : 'lg:col-span-7 xl:col-span-8'} bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-4`}>
           {/* Header & Channel Selector Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
             <div className="flex items-center gap-2.5 flex-wrap">
@@ -616,19 +738,17 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {[
                 { id: 'all', label: `All Reachable (${reachableCustomers.length})` },
                 { id: 'custom', label: `Select Customers${selectedCustomerUsernames.size > 0 ? ` (${selectedCustomerUsernames.size})` : ''}` },
-                { id: 'state', label: 'Country' },
-                { id: 'category', label: 'By Product' },
-                { id: 'single', label: 'Single Recipient' },
+                { id: 'segment', label: 'Country & Product Filters' },
               ].map((tab) => (
                 <button
                   key={tab.id}
                   type="button"
                   onClick={() => setAudienceMode(tab.id as any)}
-                  className={`py-2 px-2 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center ${
+                  className={`py-2 px-2.5 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center ${
                     audienceMode === tab.id
                       ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
                       : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
@@ -639,160 +759,94 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
               ))}
             </div>
 
-            {/* Audience Custom Customer Picker */}
-            {audienceMode === 'custom' && (
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2.5">
-                {/* Search & Quick Action Toolbar */}
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="relative flex-1 min-w-[200px]">
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={customerSearchQuery}
-                      onChange={(e) => setCustomerSearchQuery(e.target.value)}
-                      placeholder="Search by name, username, phone, or country..."
-                      className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
+            {/* Audience Combined Filters (Country & Product in 1 Section with 2 Dropdowns) */}
+            {audienceMode === 'segment' && (
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                    <Filter className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Filter By Segment (Country &amp; Product)</span>
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  {(selectedState !== 'All' || selectedCategory !== 'All') && (
                     <button
                       type="button"
-                      onClick={handleSelectAllFiltered}
-                      className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-bold border border-blue-200 cursor-pointer transition-all active:scale-95"
+                      onClick={() => {
+                        setSelectedState('All');
+                        setSelectedCategory('All');
+                      }}
+                      className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
                     >
-                      Select All Filtered ({filteredCustomerPickerList.length})
+                      Reset Both Filters
                     </button>
-                    <button
-                      type="button"
-                      onClick={handleClearAllSelected}
-                      className="px-2.5 py-1 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 text-[11px] font-bold cursor-pointer transition-all active:scale-95"
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </div>
-
-                {/* Selected Status Bar */}
-                <div className="flex items-center justify-between text-[11px] font-semibold text-slate-600 px-1">
-                  <span>
-                    Showing {filteredCustomerPickerList.length} of {reachableCustomers.length} reachable buyers
-                  </span>
-                  <span className="font-extrabold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                    {selectedCustomerUsernames.size} Selected
-                  </span>
-                </div>
-
-                {/* Scrollable Customer List with Checkboxes */}
-                <div className="max-h-52 overflow-y-auto space-y-1.5 border border-slate-200 rounded-lg p-1.5 bg-white divide-y divide-slate-100">
-                  {filteredCustomerPickerList.length === 0 ? (
-                    <div className="text-center py-6 text-xs text-slate-400 font-medium">
-                      No matching customers found
-                    </div>
-                  ) : (
-                    filteredCustomerPickerList.map((cust) => {
-                      const isChecked = selectedCustomerUsernames.has(cust.username);
-                      return (
-                        <div
-                          key={cust.username}
-                          onClick={() => handleToggleCustomer(cust.username)}
-                          className={`flex items-center justify-between gap-2 p-2 rounded-lg cursor-pointer transition-all ${
-                            isChecked
-                              ? 'bg-blue-50/80 border border-blue-200 text-slate-900'
-                              : 'hover:bg-slate-50 text-slate-700'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => {}} // Handled by parent click
-                              className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer pointer-events-none"
-                            />
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5 truncate">
-                                <span className="font-bold text-xs text-slate-900 truncate">{cust.name}</span>
-                                <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded shrink-0">
-                                  @{cust.username}
-                                </span>
-                              </div>
-                              <span className="text-[11px] font-mono font-medium text-emerald-700 block">
-                                {cust.phone}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="text-right shrink-0">
-                            <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-                              {cust.country || 'Malaysia'}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })
                   )}
                 </div>
-              </div>
-            )}
 
-            {/* Audience Filters */}
-            {audienceMode === 'state' && (
-              <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
-                <span className="font-bold text-slate-600 shrink-0">Select Country:</span>
-                <div className="w-64">
-                  <CustomDropdown
-                    options={countriesList.map((c) => ({
-                      value: c,
-                      label: c === 'All' ? 'All Countries' : c,
-                    }))}
-                    value={selectedState}
-                    onChange={setSelectedState}
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Dropdown 1: Country */}
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold uppercase text-slate-500">
+                      1. Select Country
+                    </label>
+                    <CustomDropdown
+                      options={countriesList.map((c) => ({
+                        value: c,
+                        label: c === 'All' ? 'All Countries (Any)' : c,
+                      }))}
+                      value={selectedState}
+                      onChange={setSelectedState}
+                    />
+                  </div>
+
+                  {/* Dropdown 2: Product */}
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold uppercase text-slate-500">
+                      2. Select Product
+                    </label>
+                    <CustomDropdown
+                      options={productsList.map((p) => ({
+                        value: p,
+                        label: p === 'All' ? 'All Products (Any)' : p,
+                      }))}
+                      value={selectedCategory}
+                      onChange={setSelectedCategory}
+                    />
+                  </div>
+                </div>
+
+                {/* Filter result status */}
+                <div className="text-[11px] text-slate-600 font-semibold bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between">
+                  <span>Matching segment criteria:</span>
+                  <span className="font-extrabold text-slate-900 font-mono">
+                    {
+                      reachableCustomers.filter((c) => {
+                        const matchCountry = selectedState === 'All' || c.country === selectedState;
+                        const matchProduct = selectedCategory === 'All' || c.product === selectedCategory;
+                        return matchCountry && matchProduct;
+                      }).length
+                    }{' '}
+                    Reachable Customers
+                  </span>
                 </div>
               </div>
             )}
 
-            {audienceMode === 'category' && (
-              <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs">
-                <span className="font-bold text-slate-600 shrink-0">Select Product:</span>
-                <div className="w-64">
-                  <CustomDropdown
-                    options={productsList.map((p) => ({
-                      value: p,
-                      label: p === 'All' ? 'All Products' : p,
-                    }))}
-                    value={selectedCategory}
-                    onChange={setSelectedCategory}
-                  />
-                </div>
-              </div>
-            )}
-
-            {audienceMode === 'single' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-0.5">
-                    Phone Number (+60)
-                  </label>
+            {/* Quick Added Number inclusion checkbox for bulk blasts */}
+            {(audienceMode === 'all' || audienceMode === 'segment') && customTestRecipients.length > 0 && (
+              <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-50/80 border border-emerald-200 text-xs">
+                <label className="flex items-center gap-2 cursor-pointer select-none font-bold text-emerald-900">
                   <input
-                    type="text"
-                    value={singlePhone}
-                    onChange={(e) => setSinglePhone(e.target.value)}
-                    placeholder="e.g. +60123456789"
-                    className="w-full px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-mono font-bold text-slate-800"
+                    type="checkbox"
+                    checked={includeTestNumbersInBulk}
+                    onChange={(e) => setIncludeTestNumbersInBulk(e.target.checked)}
+                    className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-emerald-300 cursor-pointer"
                   />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-0.5">
-                    Recipient Name
-                  </label>
-                  <input
-                    type="text"
-                    value={singleRecipientName}
-                    onChange={(e) => setSingleRecipientName(e.target.value)}
-                    placeholder="e.g. Ahmad Rizal"
-                    className="w-full px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-xs font-bold text-slate-800"
-                  />
-                </div>
+                  <span>
+                    Include {customTestRecipients.length} added mobile number{customTestRecipients.length > 1 ? 's' : ''} in this blast
+                  </span>
+                </label>
+                <span className="text-[11px] text-emerald-700 font-mono font-medium truncate max-w-[200px]">
+                  ({customTestRecipients.map((t) => t.name).join(', ')})
+                </span>
               </div>
             )}
           </div>
@@ -925,83 +979,298 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
           </div>
         </div>
 
-        {/* Right Column: Live Mobile & WhatsApp Preview Panel */}
-        <div className="lg:col-span-1 bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-4 flex flex-col justify-between">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <Smartphone className="w-4 h-4 text-emerald-600" />
-                <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
-                  Live Message Preview
-                </h3>
-              </div>
-              <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-extrabold">
-                Real-Time
-              </span>
-            </div>
-
-            {/* Smartphone Chat Preview Frame */}
-            <div className="rounded-xl border border-emerald-300 bg-[#e5ddd5] p-3 shadow-inner flex flex-col justify-between overflow-hidden relative min-h-[200px]">
-              {/* WhatsApp Header */}
-              <div className="bg-[#075e54] text-white p-2.5 rounded-t-lg -mx-3 -mt-3 flex items-center justify-between shadow-xs mb-3">
+        {/* Right Column: Custom Customer Directory (if Select Customers active) OR Live Mobile Preview (if other modes) */}
+        {audienceMode === 'custom' ? (
+          <div className="lg:col-span-7 bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-3.5 flex flex-col justify-between">
+            <div className="space-y-3">
+              {/* Header & Status Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-full bg-emerald-400 text-emerald-950 font-black text-[10px] flex items-center justify-center">
-                    WCG
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold leading-tight">WCGMall Official Store</div>
-                    <div className="text-[9px] text-emerald-200">Online • Verified</div>
-                  </div>
+                  <Users className="w-4 h-4 text-blue-600" />
+                  <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                    Select Recipients Directory
+                  </h3>
                 </div>
-                <MessageCircle className="w-4 h-4 text-emerald-300" />
-              </div>
-
-              {/* Chat Bubble */}
-              <div className="bg-[#dcf8c6] text-slate-900 p-2.5 rounded-lg rounded-tl-none shadow-xs text-xs space-y-1 self-start max-w-[96%] my-auto relative">
-                <p className="whitespace-pre-wrap text-[11px] font-sans leading-relaxed text-slate-800">
-                  {previewMessage}
-                </p>
-                <div className="flex items-center justify-end gap-1 text-[9px] text-slate-500 font-mono">
-                  <span>12:45 PM</span>
-                  <CheckCheck className="w-3 h-3 text-blue-500" />
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold text-slate-500">
+                    Showing {filteredCustomerPickerList.length} of {allSelectableRecipients.length}
+                  </span>
+                  <span className="font-extrabold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200 text-xs">
+                    {selectedCustomerUsernames.size} Selected
+                  </span>
                 </div>
               </div>
 
-              {/* Recipient Indicator */}
-              <div className="text-[10px] text-emerald-900 font-bold bg-emerald-100/90 px-2 py-0.5 rounded text-center mt-3 border border-emerald-200">
-                Preview for {previewRecipient.name}
+              {/* Search & Actions Toolbar */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="relative flex-1 min-w-[200px]">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={customerSearchQuery}
+                    onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                    placeholder="Search by name, phone, country, or username..."
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-50 border border-slate-300 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white"
+                  />
+                </div>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingTestNumber(!isAddingTestNumber)}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold border cursor-pointer transition-all active:scale-95 flex items-center gap-1 ${
+                      isAddingTestNumber
+                        ? 'bg-emerald-600 text-white border-emerald-600'
+                        : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+                    }`}
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Number</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSelectAllFiltered}
+                    className="px-2.5 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-bold border border-blue-200 cursor-pointer transition-all active:scale-95"
+                  >
+                    Select All ({filteredCustomerPickerList.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClearAllSelected}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold cursor-pointer transition-all active:scale-95"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+              {/* Inline Form to Add Mobile Number */}
+              {isAddingTestNumber && (
+                <div className="p-3 bg-emerald-50/90 rounded-xl border border-emerald-300 space-y-2.5 shadow-xs animate-fade-in">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-900">
+                      <Plus className="w-3.5 h-3.5 text-emerald-700" />
+                      <span>Add Mobile Number</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingTestNumber(false)}
+                      className="text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-emerald-800 mb-0.5">
+                        Name / Label
+                      </label>
+                      <input
+                        type="text"
+                        value={newTestName}
+                        onChange={(e) => setNewTestName(e.target.value)}
+                        placeholder="e.g. My Phone / Colleague"
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-emerald-800 mb-0.5">
+                        Mobile Number
+                      </label>
+                      <input
+                        type="text"
+                        value={newTestPhone}
+                        onChange={(e) => setNewTestPhone(e.target.value)}
+                        placeholder="e.g. 0123456789 or +60123456789"
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-xs font-mono font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingTestNumber(false)}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-slate-600 hover:bg-slate-200 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAddTestRecipient()}
+                      className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold shadow-2xs cursor-pointer transition-all active:scale-95"
+                    >
+                      Save Number
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Spacious, Tall Customer Directory List */}
+              <div className="h-[480px] max-h-[520px] overflow-y-auto space-y-1.5 border border-slate-200 rounded-xl p-2 bg-slate-50/50 divide-y divide-slate-100">
+                {filteredCustomerPickerList.length === 0 ? (
+                  <div className="text-center py-16 text-xs text-slate-400 font-medium">
+                    No matching recipients found
+                  </div>
+                ) : (
+                  filteredCustomerPickerList.map((cust) => {
+                    const isChecked = selectedCustomerUsernames.has(cust.username);
+                    const isTest = 'isTest' in cust && (cust as any).isTest;
+
+                    return (
+                      <div
+                        key={cust.username}
+                        onClick={() => handleToggleCustomer(cust.username)}
+                        className={`flex items-center justify-between gap-2 p-2 rounded-lg cursor-pointer transition-all ${
+                          isChecked
+                            ? isTest
+                              ? 'bg-emerald-50 border border-emerald-300 text-slate-900 shadow-2xs'
+                              : 'bg-blue-50/90 border border-blue-200 text-slate-900 shadow-2xs'
+                            : 'bg-white hover:bg-slate-100/80 text-slate-700 border border-transparent'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {}} // Handled by parent click
+                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 cursor-pointer pointer-events-none"
+                          />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 truncate">
+                              <span className="font-bold text-xs text-slate-900 truncate">{cust.name}</span>
+                              {isTest ? (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shrink-0">
+                                  <span>Added Mobile Number</span>
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded shrink-0">
+                                  @{cust.username}
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[11px] font-mono font-medium text-emerald-700 block">
+                              {cust.phone}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {!isTest && (
+                            <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                              {cust.country || 'Malaysia'}
+                            </span>
+                          )}
+                          {isTest && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteTestRecipient((cust as any).id, cust.username);
+                              }}
+                              className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded cursor-pointer transition-colors"
+                              title="Remove added number"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
-          </div>
 
-          {/* Campaign Analytics & Cost Summary Box */}
-          <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 space-y-2.5 text-xs">
-            <div className="text-[11px] font-extrabold text-slate-800 uppercase tracking-wider flex items-center justify-between">
-              <span>Campaign Summary</span>
-              <span className="text-emerald-600 font-extrabold text-[10px] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                {dispatchChannel === 'sms' ? 'SMS Movider' : dispatchChannel === 'whatsapp' ? 'WhatsApp API' : 'Omnichannel'}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-2xs">
-                <span className="text-slate-400 block text-[10px] font-bold uppercase">Recipients</span>
-                <span className="font-extrabold text-slate-900 text-sm">{targetCount} buyers</span>
-              </div>
-              <div className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-2xs">
-                <span className="text-slate-400 block text-[10px] font-bold uppercase">Est. Cost</span>
-                <span className="font-extrabold text-blue-700 text-sm">
-                  ~${(targetCount * smsSegments * 0.025).toFixed(2)}
+            {/* Bottom Live Preview Box inside Select Directory tab */}
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+              <div className="flex items-center gap-2 truncate">
+                <Smartphone className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                <span className="text-[11px] text-slate-600 truncate">
+                  <strong>Preview ({previewRecipient.name}):</strong> <span className="font-mono text-slate-800">{previewMessage.substring(0, 50)}...</span>
                 </span>
               </div>
-            </div>
-
-            <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-200/60 font-medium">
-              <span>Sender ID: <strong className="text-slate-800 font-bold">WCGMall</strong></span>
-              <span>Rate: <strong className="text-slate-800 font-bold">$0.025 / SMS</strong></span>
+              <span className="text-[11px] font-extrabold text-blue-700 shrink-0 ml-2">
+                ~${(targetCount * smsSegments * 0.025).toFixed(2)} est.
+              </span>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="lg:col-span-5 xl:col-span-4 bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-4 flex flex-col justify-between">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <Smartphone className="w-4 h-4 text-emerald-600" />
+                  <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                    Live Message Preview
+                  </h3>
+                </div>
+                <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-extrabold">
+                  Real-Time
+                </span>
+              </div>
+
+              {/* Smartphone Chat Preview Frame */}
+              <div className="rounded-xl border border-emerald-300 bg-[#e5ddd5] p-3 shadow-inner flex flex-col justify-between overflow-hidden relative min-h-[220px]">
+                {/* WhatsApp Header */}
+                <div className="bg-[#075e54] text-white p-2.5 rounded-t-lg -mx-3 -mt-3 flex items-center justify-between shadow-xs mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-full bg-emerald-400 text-emerald-950 font-black text-[10px] flex items-center justify-center">
+                      WCG
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold leading-tight">WCGMall Official Store</div>
+                      <div className="text-[9px] text-emerald-200">Online • Verified</div>
+                    </div>
+                  </div>
+                  <MessageCircle className="w-4 h-4 text-emerald-300" />
+                </div>
+
+                {/* Chat Bubble with RM0 WCGMall prefix */}
+                <div className="bg-[#dcf8c6] text-slate-900 p-2.5 rounded-lg rounded-tl-none shadow-xs text-xs space-y-1 self-start max-w-[96%] my-auto relative">
+                  <p className="whitespace-pre-wrap text-[11px] font-sans leading-relaxed text-slate-800">
+                    {previewMessage}
+                  </p>
+                  <div className="flex items-center justify-end gap-1 text-[9px] text-slate-500 font-mono">
+                    <span>12:45 PM</span>
+                    <CheckCheck className="w-3 h-3 text-blue-500" />
+                  </div>
+                </div>
+
+                {/* Recipient Indicator */}
+                <div className="text-[10px] text-emerald-900 font-bold bg-emerald-100/90 px-2 py-0.5 rounded text-center mt-3 border border-emerald-200">
+                  Preview for {previewRecipient.name}
+                </div>
+              </div>
+            </div>
+
+            {/* Campaign Analytics & Cost Summary Box */}
+            <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 space-y-2.5 text-xs">
+              <div className="text-[11px] font-extrabold text-slate-800 uppercase tracking-wider flex items-center justify-between">
+                <span>Campaign Summary</span>
+                <span className="text-emerald-600 font-extrabold text-[10px] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                  {dispatchChannel === 'sms' ? 'SMS Movider' : dispatchChannel === 'whatsapp' ? 'WhatsApp API' : 'Omnichannel'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-2xs">
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Recipients</span>
+                  <span className="font-extrabold text-slate-900 text-sm">{targetCount} buyers</span>
+                </div>
+                <div className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-2xs">
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Est. Cost</span>
+                  <span className="font-extrabold text-blue-700 text-sm">
+                    ~${(targetCount * smsSegments * 0.025).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-200/60 font-medium">
+                <span>Sender ID: <strong className="text-slate-800 font-bold">WCGMall</strong></span>
+                <span>Rate: <strong className="text-slate-800 font-bold">$0.025 / SMS</strong></span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Section 2: Interactive 1-Click WhatsApp Direct Chat Queue */}
