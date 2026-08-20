@@ -93,14 +93,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // Role-Based Filtering
   // Accountant: Hide SMS Marketing, Top Ranking, Customer Directory
-  // CS: Hide Financial & SMS Marketing
+  // CS: Hide Financial (Has access to SMS & WhatsApp Marketing, Orders, Customer Directory, Overview, Settings)
   // Marketing: Hide Financial & SMS Marketing (Access to Top Rankings, Customers with masked buyer info, Orders, Overview, Settings)
   // Admin: Full access
   const navItems = allNavItems.filter((item) => {
     if (userRole === 'accountant') {
       if (['sms', 'topRankings', 'customers'].includes(item.id)) return false;
     } else if (userRole === 'cs') {
-      if (['financial', 'sms'].includes(item.id)) return false;
+      if (['financial'].includes(item.id)) return false;
     } else if (userRole === 'marketing') {
       if (['topRankings', 'customers', 'financial', 'sms'].includes(item.id)) return false;
     }

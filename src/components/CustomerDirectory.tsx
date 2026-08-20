@@ -29,6 +29,7 @@ import { inferBuyerRace } from '../utils/raceHelper';
 import { isCancelledOrder, isMaskedString } from '../utils/csvHelper';
 import { OrderDetailsModal } from './OrderDetailsModal';
 import { CustomDropdown } from './CustomDropdown';
+import { PaginationControls } from './PaginationControls';
 import { maskCustomerName, maskUsername, maskPhone, maskAddress, maskPrice } from '../utils/maskHelper';
 
 export interface CustomerSmsLog {
@@ -85,6 +86,8 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
     key: 'successfulOrderCount',
     order: 'desc',
   });
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(25);
 
   const handleToggleOverview = () => {
     setIsOverviewExpanded((prev: boolean) => {
@@ -347,6 +350,19 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
         : 0;
     });
   }, [customers, searchQuery, selectedCountry, selectedRace, sortConfig]);
+
+  // Reset pagination to page 1 whenever filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedCountry, selectedRace, sortConfig]);
+
+  const totalRecords = filteredCustomers.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalRecords);
+  const paginatedCustomers = useMemo(() => {
+    return filteredCustomers.slice(startIndex, endIndex);
+  }, [filteredCustomers, startIndex, endIndex]);
 
   // Active Selected Customer & Customer Orders List
   const selectedCustomer = useMemo(() => {
@@ -640,14 +656,14 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-              {filteredCustomers.length === 0 ? (
+              {paginatedCustomers.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-12 text-center text-slate-400 font-medium">
                     No customer records found matching search filters.
                   </td>
                 </tr>
               ) : (
-                filteredCustomers.map((c, idx) => {
+                paginatedCustomers.map((c, idx) => {
                   const maskedName = maskCustomerName(c.name, userRole);
                   const maskedUser = maskUsername(c.username, userRole);
                   const maskedPh = maskPhone(c.phone, userRole);
@@ -701,6 +717,23 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
           </table>
         </div>
       </div>
+
+      {/* Rows per page & Pagination Controls */}
+      {filteredCustomers.length > 0 && (
+        <PaginationControls
+          currentPage={currentPage}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setCurrentPage(1);
+          }}
+          totalRecords={totalRecords}
+          startIndex={startIndex}
+          endIndex={endIndex}
+        />
+      )}
 
       {/* 4. CUSTOMER PROFILE MODAL (Shows Successful Orders, Total Orders, & Outreach History) */}
       {selectedCustomer && (
