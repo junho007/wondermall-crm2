@@ -33,14 +33,18 @@ import {
   ArrowDown,
   ShoppingBag,
   RotateCcw,
+  User,
+  ArrowLeft,
 } from 'lucide-react';
-import { ShopeeOrder } from '../types';
+import { ShopeeOrder, UserRole } from '../types';
 import { isValidSmsPhone } from '../utils/csvHelper';
 import { CustomDropdown, OptionItem } from './CustomDropdown';
 import { PaginationControls } from './PaginationControls';
+import { CustomerProfileModal } from './CustomerProfileModal';
 
 interface SmsMarketingPanelProps {
   orders: ShopeeOrder[];
+  userRole?: UserRole;
 }
 
 interface CustomTestRecipient {
@@ -83,7 +87,7 @@ const formatWhatsAppPhone = (rawPhone: string): string => {
 const VALID_DEFAULT_KEY = 'iPnNDUbKo2OyVvr5osnidwt8uL1-GW';
 const VALID_DEFAULT_SECRET = 'Jl0WWdL6vGjbq5ZVT2qxLFJqUYadPE';
 
-export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) => {
+export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, userRole }) => {
   // Movider API Credentials State - ensure stale keys are auto-corrected
   const [apiKey, setApiKey] = useState(() => {
     const saved = localStorage.getItem('wm_movider_api_key');
@@ -110,6 +114,20 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
   const [audienceMode, setAudienceMode] = useState<'all' | 'custom'>('all');
   const [selectedCustomerUsernames, setSelectedCustomerUsernames] = useState<Set<string>>(new Set());
   const [customerSearchQuery, setCustomerSearchQuery] = useState<string>('');
+
+  // Page View State: 'composer' (Hub + Composer + WA Queue) vs 'history' (Dedicated Campaign Logs & Audit History)
+  const [activeView, setActiveView] = useState<'composer' | 'history'>('composer');
+
+  // 1-Click WhatsApp Queue Pagination & Customer Profile Modal State
+  const [waQueuePage, setWaQueuePage] = useState<number>(1);
+  const [waQueuePageSize, setWaQueuePageSize] = useState<number>(25);
+  const [selectedProfileCustomer, setSelectedProfileCustomer] = useState<{
+    username?: string;
+    name?: string;
+    phone?: string;
+    country?: string;
+    product?: string;
+  } | null>(null);
 
   // Added Custom Mobile Numbers State
   const [customTestRecipients, setCustomTestRecipients] = useState<CustomTestRecipient[]>(() => {
@@ -393,6 +411,20 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
 
   const targetCount = targetRecipients.length;
 
+  // WhatsApp Queue Pagination Calculations
+  const totalWaRecords = targetRecipients.length;
+  const totalWaPages = Math.max(1, Math.ceil(totalWaRecords / waQueuePageSize));
+  const waStartIndex = (waQueuePage - 1) * waQueuePageSize;
+  const waEndIndex = Math.min(waStartIndex + waQueuePageSize, totalWaRecords);
+  const paginatedWaRecipients = useMemo(() => {
+    return targetRecipients.slice(waStartIndex, waEndIndex);
+  }, [targetRecipients, waStartIndex, waEndIndex]);
+
+  // Reset WhatsApp Queue Page whenever audience filters or total recipients count change
+  useEffect(() => {
+    setWaQueuePage(1);
+  }, [targetRecipients.length, audienceMode, selectedCustomerUsernames.size]);
+
   // Detect Unicode / non-GSM characters
   const hasUnicode = useMemo(() => {
     const gsmRegex = /^[@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ\x1bÆæßÉ !"#¤%&'()*+,\-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà]*$/;
@@ -460,52 +492,6 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
       localStorage.setItem('wm_movider_sms_logs', JSON.stringify(smsOnlyLogs));
     } catch (err) {
       console.warn('Failed to fetch SMS logs:', err);
-    } finally {
-      setIsLoadingLogs(false);
-    }
-  };
-
-  // Sync Movider Gateway History
-  const handleSyncMoviderHistory = async () => {
-    setIsLoadingLogs(true);
-    try {
-      const res = await fetch('/api/send-sms', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'sync_history',
-          apiKey: apiKey || 'iPnNDUbKo2OyVvr5osnidwt8uL1-GW',
-          apiSecret: apiSecret || 'Jl0WWdL6vGjbq5ZVT2qxLFJqUYadPE',
-        }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.logs) {
-          const localSmsLogs: SmsLog[] = JSON.parse(localStorage.getItem('wm_movider_sms_logs') || '[]');
-          const localWaLogs: SmsLog[] = JSON.parse(localStorage.getItem('wm_whatsapp_logs') || '[]');
-
-          const logMap = new Map<string, SmsLog>();
-          [...localWaLogs, ...localSmsLogs, ...data.logs].forEach((l) => {
-            if (l && l.id) logMap.set(l.id, l);
-          });
-
-          const combined = Array.from(logMap.values()).sort(
-            (a, b) => new Date(b.sentTime).getTime() - new Date(a.sentTime).getTime()
-          );
-
-          setSmsLogs(combined);
-          const smsOnlyLogs = combined.filter((x) => x.channel !== 'WHATSAPP' && x.senderId !== 'WHATSAPP_WEB');
-          localStorage.setItem('wm_movider_sms_logs', JSON.stringify(smsOnlyLogs));
-
-          setToastMessage('✅ Movider gateway SMS campaign logs synced successfully!');
-          setTimeout(() => setToastMessage(null), 3500);
-        }
-      }
-    } catch (err) {
-      console.warn('Sync history error:', err);
-      setToastMessage('❌ Unable to sync gateway logs. Please check API credentials.');
-      setTimeout(() => setToastMessage(null), 3500);
     } finally {
       setIsLoadingLogs(false);
     }
@@ -726,12 +712,12 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
       <div className="bg-white rounded-2xl p-5 shadow-xs border border-slate-200 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-green-500 text-white flex items-center justify-center font-bold shadow-md shrink-0">
-            <MessageCircle className="w-6 h-6" />
+            {activeView === 'history' ? <Clock className="w-6 h-6" /> : <MessageCircle className="w-6 h-6" />}
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-base font-extrabold text-slate-900 tracking-tight">
-                SMS &amp; WhatsApp Marketing Hub
+                {activeView === 'history' ? 'Outbound Campaign Logs & Audit History' : 'SMS & WhatsApp Marketing Hub'}
               </h2>
               <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold uppercase flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
@@ -739,9 +725,39 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
               </span>
             </div>
             <p className="text-xs text-slate-500 font-medium mt-0.5">
-              Engage Shopee buyers with automated order notifications, voucher delivery, and instant messaging.
+              {activeView === 'history'
+                ? 'Review audit logs, delivery statuses, error reports, and recipient responses across SMS & WhatsApp channels.'
+                : 'Engage Shopee buyers with automated order notifications, voucher delivery, and instant messaging.'}
             </p>
           </div>
+        </div>
+
+        {/* Right side of SMS & WhatsApp Marketing Hub box: History / Back Button */}
+        <div className="flex items-center gap-2">
+          {activeView === 'composer' ? (
+            <button
+              type="button"
+              onClick={() => setActiveView('history')}
+              className="px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold flex items-center gap-2 cursor-pointer shadow-sm transition-all active:scale-95 group"
+              title="View Sent Campaign Logs & History"
+            >
+              <Clock className="w-4 h-4 text-emerald-400 group-hover:rotate-12 transition-transform" />
+              <span>History</span>
+              <span className="px-2 py-0.5 rounded-full bg-slate-800 text-emerald-300 text-[10px] font-mono border border-slate-700 font-bold">
+                {smsLogs.length}
+              </span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setActiveView('composer')}
+              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold flex items-center gap-2 cursor-pointer shadow-sm transition-all active:scale-95"
+              title="Return to Campaign Composer"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back to Campaign Hub</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -758,10 +774,13 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
         </div>
       )}
 
-      {/* Main Grid: Responsive 12-Column Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Campaign Composer */}
-        <div className={`${audienceMode === 'custom' ? 'lg:col-span-5' : 'lg:col-span-7 xl:col-span-8'} bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-4`}>
+      {/* VIEW 1: CAMPAIGN COMPOSER & 1-CLICK WHATSAPP OUTREACH QUEUE */}
+      {activeView === 'composer' && (
+        <>
+          {/* Main Grid: Responsive 12-Column Layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left Column: Campaign Composer */}
+            <div className={`${audienceMode === 'custom' ? 'lg:col-span-5' : 'lg:col-span-7 xl:col-span-8'} bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-4`}>
           {/* Header & Channel Selector Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
             <div className="flex items-center gap-2.5 flex-wrap">
@@ -1450,7 +1469,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
           </span>
         </div>
 
-        <div className="overflow-x-auto max-h-60 overflow-y-auto">
+        <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200 sticky top-0 bg-slate-50">
@@ -1462,11 +1481,32 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
-              {targetRecipients.slice(0, 15).map((r, idx) => {
+              {paginatedWaRecipients.map((r, idx) => {
                 const waFormatted = formatWhatsAppPhone(r.phone);
                 return (
-                  <tr key={idx} className="hover:bg-emerald-50/50 transition-colors">
-                    <td className="py-2 px-3 font-bold text-slate-900">{r.name}</td>
+                  <tr key={idx} className="hover:bg-emerald-50/50 transition-colors group">
+                    <td className="py-2 px-3">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedProfileCustomer(r)}
+                        className="text-left group/cust cursor-pointer hover:opacity-90 transition-opacity flex items-center gap-2"
+                        title="Click to view full Customer Profile & Order History"
+                      >
+                        <div className="w-6 h-6 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 group-hover/cust:bg-blue-100 transition-colors">
+                          <User className="w-3.5 h-3.5" />
+                        </div>
+                        <div>
+                          <span className="font-bold text-xs text-slate-900 group-hover/cust:text-blue-700 group-hover/cust:underline block">
+                            {r.name}
+                          </span>
+                          {r.username && r.username !== r.name && (
+                            <span className="text-[10px] font-mono text-slate-400 block">
+                              @{r.username}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    </td>
                     <td className="py-2 px-3 font-mono font-bold text-emerald-700">
                       {r.phone} <span className="text-[10px] text-slate-400 font-normal">(+{waFormatted})</span>
                     </td>
@@ -1496,177 +1536,328 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
             </tbody>
           </table>
         </div>
-      </div>
 
-      {/* Section 3: Sent Campaign Logs & Audit History */}
-      <div className="bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
-          <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-slate-700" />
-            <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
-              Outbound Campaign Logs &amp; Audit History
-            </h3>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Filter by Channel */}
-            <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[11px]">
-              <button
-                onClick={() => setChannelFilter('ALL')}
-                className={`px-2.5 py-1 rounded-md font-bold cursor-pointer ${
-                  channelFilter === 'ALL' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500'
-                }`}
-              >
-                All ({smsLogs.length})
-              </button>
-              <button
-                onClick={() => setChannelFilter('WHATSAPP')}
-                className={`px-2.5 py-1 rounded-md font-bold cursor-pointer ${
-                  channelFilter === 'WHATSAPP' ? 'bg-emerald-600 text-white shadow-2xs' : 'text-slate-500'
-                }`}
-              >
-                WhatsApp
-              </button>
-              <button
-                onClick={() => setChannelFilter('SMS')}
-                className={`px-2.5 py-1 rounded-md font-bold cursor-pointer ${
-                  channelFilter === 'SMS' ? 'bg-blue-600 text-white shadow-2xs' : 'text-slate-500'
-                }`}
-              >
-                SMS
-              </button>
-            </div>
-
-            <div className="relative w-44 sm:w-56">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Search recipient phone..."
-                value={searchLogQuery}
-                onChange={(e) => setSearchLogQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-medium focus:outline-none focus:border-emerald-600"
-              />
-            </div>
-
-            <button
-              onClick={handleSyncMoviderHistory}
-              disabled={isLoadingLogs}
-              className="px-2.5 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
-              title="Sync Movider Gateway History"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingLogs ? 'animate-spin text-emerald-600' : 'text-emerald-700'}`} />
-              <span>Sync Gateway History</span>
-            </button>
-
-            <button
-              onClick={fetchSmsLogsAndSettings}
-              disabled={isLoadingLogs}
-              className="p-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition-colors cursor-pointer"
-              title="Refresh Logs"
-            >
-              <RefreshCw className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin text-emerald-600' : ''}`} />
-            </button>
-          </div>
-        </div>
-
-        {/* Logs Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200">
-                <th className="py-2.5 px-3">Channel</th>
-                <th className="py-2.5 px-3">Date &amp; Time</th>
-                <th className="py-2.5 px-3">Recipient Name</th>
-                <th className="py-2.5 px-3">Phone Number</th>
-                <th className="py-2.5 px-3">Message Preview</th>
-                <th className="py-2.5 px-3 text-right">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 font-medium">
-              {paginatedLogs.map((log) => {
-                const isWa = log.channel === 'WHATSAPP' || log.senderId === 'WHATSAPP_WEB';
-                return (
-                  <tr key={log.id} className="hover:bg-slate-50/70 transition-colors">
-                    <td className="py-2.5 px-3">
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase flex items-center gap-1 w-max ${
-                          isWa
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                            : 'bg-blue-100 text-blue-800 border border-blue-300'
-                        }`}
-                      >
-                        {isWa ? <MessageCircle className="w-3 h-3 text-emerald-600" /> : <Smartphone className="w-3 h-3 text-blue-600" />}
-                        <span>{isWa ? 'WhatsApp' : 'SMS'}</span>
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600 whitespace-nowrap">
-                      {new Date(log.sentTime).toLocaleString('en-GB')}
-                    </td>
-                    <td className="py-2.5 px-3 font-bold text-slate-900">{log.recipientName}</td>
-                    <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
-                      {(log.recipientPhone || '').replace(/^\+/, '').replace(/\s+/g, '')}
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-600 max-w-xs truncate" title={log.messageText}>
-                      {log.messageText}
-                    </td>
-                    <td className="py-2.5 px-3 text-right">
-                      <div className="flex flex-col items-end gap-1">
-                        <span
-                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                            log.status === 'DELIVERED' || log.status === 'WHATSAPP_LAUNCHED'
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                              : log.status === 'FAILED'
-                              ? 'bg-rose-100 text-rose-800 border border-rose-300'
-                              : 'bg-blue-100 text-blue-800 border border-blue-300'
-                          }`}
-                        >
-                          {log.status === 'WHATSAPP_LAUNCHED'
-                            ? 'WA LAUNCHED'
-                            : log.status === 'SENT_SIMULATED'
-                            ? 'SENT'
-                            : log.status}
-                        </span>
-                        {log.errorMessage && (
-                          <span className="text-[10px] font-semibold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200 max-w-xs text-right leading-tight">
-                            {log.errorMessage}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-
-              {filteredLogs.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="py-8 text-center text-xs text-slate-400 italic">
-                    No marketing messages logged for the selected filter.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Rows per page & Pagination Controls */}
-        {filteredLogs.length > 0 && (
+        {/* Rows per page & Pagination Controls for WhatsApp Outreach Queue */}
+        {totalWaRecords > 0 && (
           <div className="pt-2 border-t border-slate-100">
             <PaginationControls
-              currentPage={logsPage}
-              totalPages={totalLogsPages}
-              pageSize={logsPageSize}
-              onPageChange={setLogsPage}
+              currentPage={waQueuePage}
+              totalPages={totalWaPages}
+              pageSize={waQueuePageSize}
+              onPageChange={setWaQueuePage}
               onPageSizeChange={(size) => {
-                setLogsPageSize(size);
-                setLogsPage(1);
+                setWaQueuePageSize(size);
+                setWaQueuePage(1);
               }}
-              totalRecords={totalLogsRecords}
-              startIndex={logsStartIndex}
-              endIndex={logsEndIndex}
+              totalRecords={totalWaRecords}
+              startIndex={waStartIndex}
+              endIndex={waEndIndex}
             />
           </div>
         )}
       </div>
+      </>
+      )}
+
+      {/* VIEW 2: DEDICATED OUTBOUND CAMPAIGN LOGS & AUDIT HISTORY PAGE */}
+      {activeView === 'history' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Quick Metrics Bar for Outbound History */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-2xs">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 block">
+                Total Outreaches Logged
+              </span>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-black text-slate-900 font-mono">{smsLogs.length}</span>
+                <span className="text-[11px] font-medium text-slate-500">records</span>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-2xs">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600 block flex items-center gap-1">
+                <MessageCircle className="w-3.5 h-3.5" />
+                WhatsApp Messages
+              </span>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-black text-emerald-700 font-mono">
+                  {smsLogs.filter((l) => l.channel === 'WHATSAPP' || l.senderId === 'WHATSAPP_WEB').length}
+                </span>
+                <span className="text-[11px] font-medium text-slate-500">sent</span>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-2xs">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-blue-600 block flex items-center gap-1">
+                <Smartphone className="w-3.5 h-3.5" />
+                Movider SMS Gateway
+              </span>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-black text-blue-700 font-mono">
+                  {smsLogs.filter((l) => l.channel === 'SMS' || (!l.channel && l.senderId !== 'WHATSAPP_WEB')).length}
+                </span>
+                <span className="text-[11px] font-medium text-slate-500">dispatches</span>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl bg-white border border-slate-200 shadow-2xs">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-purple-600 block flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                Successful / Opened
+              </span>
+              <div className="flex items-baseline gap-2 mt-1">
+                <span className="text-2xl font-black text-purple-700 font-mono">
+                  {smsLogs.filter((l) => l.status === 'DELIVERED' || l.status === 'WHATSAPP_LAUNCHED').length}
+                </span>
+                <span className="text-[11px] font-medium text-slate-500">
+                  {smsLogs.length > 0
+                    ? `(${Math.round((smsLogs.filter((l) => l.status === 'DELIVERED' || l.status === 'WHATSAPP_LAUNCHED').length / smsLogs.length) * 100)}%)`
+                    : '0%'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Main History Table Container */}
+          <div className="bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-slate-700" />
+                <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
+                  Outbound Campaign Logs &amp; Audit Trail
+                </h3>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Filter by Channel */}
+                <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[11px]">
+                  <button
+                    onClick={() => setChannelFilter('ALL')}
+                    className={`px-3 py-1.5 rounded-md font-bold cursor-pointer transition-all ${
+                      channelFilter === 'ALL' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    All ({smsLogs.length})
+                  </button>
+                  <button
+                    onClick={() => setChannelFilter('WHATSAPP')}
+                    className={`px-3 py-1.5 rounded-md font-bold cursor-pointer transition-all ${
+                      channelFilter === 'WHATSAPP' ? 'bg-emerald-600 text-white shadow-2xs' : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    WhatsApp ({smsLogs.filter((l) => l.channel === 'WHATSAPP' || l.senderId === 'WHATSAPP_WEB').length})
+                  </button>
+                  <button
+                    onClick={() => setChannelFilter('SMS')}
+                    className={`px-3 py-1.5 rounded-md font-bold cursor-pointer transition-all ${
+                      channelFilter === 'SMS' ? 'bg-blue-600 text-white shadow-2xs' : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    SMS ({smsLogs.filter((l) => l.channel === 'SMS' || (!l.channel && l.senderId !== 'WHATSAPP_WEB')).length})
+                  </button>
+                </div>
+
+                <div className="relative w-48 sm:w-64">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Search name, phone, message..."
+                    value={searchLogQuery}
+                    onChange={(e) => setSearchLogQuery(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 text-xs font-medium focus:outline-none focus:border-emerald-600"
+                  />
+                  {searchLogQuery && (
+                    <button
+                      onClick={() => setSearchLogQuery('')}
+                      className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  onClick={fetchSmsLogsAndSettings}
+                  disabled={isLoadingLogs}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                  title="Refresh Audit Logs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingLogs ? 'animate-spin text-emerald-600' : ''}`} />
+                  <span>Refresh Logs</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Logs Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] border-b border-slate-200">
+                    <th className="py-2.5 px-3">Channel</th>
+                    <th className="py-2.5 px-3">Date &amp; Time</th>
+                    <th className="py-2.5 px-3">Recipient Customer</th>
+                    <th className="py-2.5 px-3">Phone Number</th>
+                    <th className="py-2.5 px-3">Message Preview</th>
+                    <th className="py-2.5 px-3 text-center">Status</th>
+                    <th className="py-2.5 px-3 text-right">Quick Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium">
+                  {paginatedLogs.map((log) => {
+                    const isWa = log.channel === 'WHATSAPP' || log.senderId === 'WHATSAPP_WEB';
+                    const waFormatted = formatWhatsAppPhone(log.recipientPhone);
+                    return (
+                      <tr key={log.id} className="hover:bg-slate-50/80 transition-colors group">
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-extrabold uppercase flex items-center gap-1 w-max ${
+                              isWa
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                : 'bg-blue-100 text-blue-800 border border-blue-300'
+                            }`}
+                          >
+                            {isWa ? <MessageCircle className="w-3 h-3 text-emerald-600" /> : <Smartphone className="w-3 h-3 text-blue-600" />}
+                            <span>{isWa ? 'WhatsApp' : 'SMS'}</span>
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-[11px] text-slate-600 whitespace-nowrap relative group/time">
+                          <span className="cursor-default">
+                            {new Date(log.sentTime).toLocaleString('en-GB')}
+                          </span>
+                          <div className="absolute left-0 bottom-full mb-1 z-50 hidden group-hover/time:block p-2 bg-slate-900 text-white text-[10px] rounded-lg shadow-lg border border-slate-800 pointer-events-none whitespace-nowrap">
+                            <span className="font-bold text-slate-400">Timestamp: </span>
+                            <span className="font-mono font-bold text-emerald-300">{log.sentTime}</span>
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedProfileCustomer({
+                                name: log.recipientName,
+                                phone: log.recipientPhone,
+                                username: log.recipientName,
+                              })
+                            }
+                            className="text-left group/cust cursor-pointer hover:opacity-90 transition-opacity flex items-center gap-2"
+                            title="Click to view Customer Profile & Order History"
+                          >
+                            <div className="w-6 h-6 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 group-hover/cust:bg-blue-100 transition-colors">
+                              <User className="w-3.5 h-3.5" />
+                            </div>
+                            <span className="font-bold text-xs text-slate-900 group-hover/cust:text-blue-700 group-hover/cust:underline">
+                              {log.recipientName}
+                            </span>
+                          </button>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono font-bold text-slate-800 whitespace-nowrap">
+                          {(log.recipientPhone || '').replace(/^\+/, '').replace(/\s+/g, '')}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-600 max-w-xs relative group/msg">
+                          <div className="truncate cursor-pointer hover:text-slate-900 font-medium">
+                            {log.messageText}
+                          </div>
+                          {/* Hover Preview Tooltip */}
+                          <div className="absolute left-0 bottom-full mb-1.5 z-50 hidden group-hover/msg:block w-72 sm:w-80 p-3 bg-white text-slate-900 text-xs rounded-xl shadow-2xl border border-slate-200/90 pointer-events-none leading-snug whitespace-normal ring-1 ring-slate-900/5">
+                            <div className="text-[10px] text-purple-600 font-extrabold uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                              <MessageSquare className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                              <span>FULL MESSAGE CONTENT</span>
+                            </div>
+                            <div className="font-semibold text-slate-800 break-words leading-relaxed">{log.messageText}</div>
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <div className="flex flex-col items-center gap-0.5">
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                                log.status === 'DELIVERED' || log.status === 'WHATSAPP_LAUNCHED'
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                  : log.status === 'FAILED'
+                                  ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                                  : 'bg-blue-100 text-blue-800 border border-blue-300'
+                              }`}
+                            >
+                              {log.status === 'WHATSAPP_LAUNCHED'
+                                ? 'WA LAUNCHED'
+                                : log.status === 'SENT_SIMULATED'
+                                ? 'SENT'
+                                : log.status}
+                            </span>
+                            {log.errorMessage && (
+                              <span className="text-[9px] font-semibold text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 max-w-[140px] truncate text-center leading-tight" title={log.errorMessage}>
+                                {log.errorMessage}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                          {waFormatted ? (
+                            <button
+                              type="button"
+                              onClick={() => handleLaunchWhatsAppChat({ name: log.recipientName, phone: log.recipientPhone })}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-2xs transition-all active:scale-95 ml-auto"
+                              title="Open WhatsApp chat with this customer"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>WhatsApp</span>
+                              <ExternalLink className="w-3 h-3 text-emerald-500" />
+                            </button>
+                          ) : (
+                            <span className="text-slate-300 text-[11px] italic">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {filteredLogs.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-xs text-slate-400 space-y-2">
+                        <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
+                          <Clock className="w-5 h-5" />
+                        </div>
+                        <p className="font-semibold text-slate-600">No outbound campaign messages match the selected filter.</p>
+                        <p className="text-[11px] text-slate-400">
+                          Dispatched SMS or WhatsApp marketing campaigns will appear here for auditing.
+                        </p>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Rows per page & Pagination Controls */}
+            {filteredLogs.length > 0 && (
+              <div className="pt-2 border-t border-slate-100">
+                <PaginationControls
+                  currentPage={logsPage}
+                  totalPages={totalLogsPages}
+                  pageSize={logsPageSize}
+                  onPageChange={setLogsPage}
+                  onPageSizeChange={(size) => {
+                    setLogsPageSize(size);
+                    setLogsPage(1);
+                  }}
+                  totalRecords={totalLogsRecords}
+                  startIndex={logsStartIndex}
+                  endIndex={logsEndIndex}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Customer Profile Modal for WhatsApp Queue / Marketing audience */}
+      {selectedProfileCustomer && (
+        <CustomerProfileModal
+          customer={selectedProfileCustomer}
+          orders={orders}
+          userRole={userRole}
+          onClose={() => setSelectedProfileCustomer(null)}
+        />
+      )}
     </div>
   );
 };

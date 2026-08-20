@@ -1146,7 +1146,7 @@ export default function App() {
 
           {/* TAB 6: SMS MARKETING (MOVIDER) */}
           {activeTab === 'sms' && (
-            <SmsMarketingPanel orders={channelFilteredOrders} />
+            <SmsMarketingPanel orders={channelFilteredOrders} userRole={userRole} />
           )}
 
           {/* TAB 7: SETTINGS & SYSTEM TOOLS */}
