@@ -37,6 +37,7 @@ import {
 import { ShopeeOrder } from '../types';
 import { isValidSmsPhone } from '../utils/csvHelper';
 import { CustomDropdown, OptionItem } from './CustomDropdown';
+import { PaginationControls } from './PaginationControls';
 
 interface SmsMarketingPanelProps {
   orders: ShopeeOrder[];
@@ -143,9 +144,10 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
     }
   }, [customTestRecipients]);
 
-  const [messageText, setMessageText] = useState<string>(
-    'Hi {buyerName}! Thank you for ordering from WCGMall on Shopee. Your voucher code is ready in your chat!'
-  );
+  const DEFAULT_CAMPAIGN_MESSAGE =
+    'Thank you for shopping with us! Sign up on WCGMall(.)com to discover more benefits. Happy shopping!';
+
+  const [messageText, setMessageText] = useState<string>(DEFAULT_CAMPAIGN_MESSAGE);
 
   const [isSending, setIsSending] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -153,6 +155,8 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
   const [isLoadingLogs, setIsLoadingLogs] = useState<boolean>(false);
   const [searchLogQuery, setSearchLogQuery] = useState<string>('');
   const [channelFilter, setChannelFilter] = useState<'ALL' | 'SMS' | 'WHATSAPP'>('ALL');
+  const [logsPage, setLogsPage] = useState<number>(1);
+  const [logsPageSize, setLogsPageSize] = useState<number>(10);
 
   // Extract unique customers from orders with phone number detection and purchase count tracking
   const customerList = useMemo(() => {
@@ -696,6 +700,19 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
     });
   }, [smsLogs, searchLogQuery, channelFilter]);
 
+  // Reset logs pagination to page 1 whenever filters change
+  useEffect(() => {
+    setLogsPage(1);
+  }, [searchLogQuery, channelFilter]);
+
+  const totalLogsRecords = filteredLogs.length;
+  const totalLogsPages = Math.max(1, Math.ceil(totalLogsRecords / logsPageSize));
+  const logsStartIndex = (logsPage - 1) * logsPageSize;
+  const logsEndIndex = Math.min(logsStartIndex + logsPageSize, totalLogsRecords);
+  const paginatedLogs = useMemo(() => {
+    return filteredLogs.slice(logsStartIndex, logsEndIndex);
+  }, [filteredLogs, logsStartIndex, logsEndIndex]);
+
   // First recipient for live preview
   const previewRecipient = targetRecipients[0] || { name: 'Ahmad Rizal', phone: '+60123456789' };
   const rawPersonalized = messageText.replace(/\{buyerName\}/g, previewRecipient.name);
@@ -863,6 +880,14 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMessageText(DEFAULT_CAMPAIGN_MESSAGE)}
+                className="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 text-xs font-bold border border-indigo-200 transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs active:scale-95"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                <span>WCGMall Benefits (Default)</span>
+              </button>
               <button
                 type="button"
                 onClick={() => handleGenerateTemplate('voucher')}
@@ -1558,7 +1583,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
-              {filteredLogs.map((log) => {
+              {paginatedLogs.map((log) => {
                 const isWa = log.channel === 'WHATSAPP' || log.senderId === 'WHATSAPP_WEB';
                 return (
                   <tr key={log.id} className="hover:bg-slate-50/70 transition-colors">
@@ -1622,6 +1647,25 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
             </tbody>
           </table>
         </div>
+
+        {/* Rows per page & Pagination Controls */}
+        {filteredLogs.length > 0 && (
+          <div className="pt-2 border-t border-slate-100">
+            <PaginationControls
+              currentPage={logsPage}
+              totalPages={totalLogsPages}
+              pageSize={logsPageSize}
+              onPageChange={setLogsPage}
+              onPageSizeChange={(size) => {
+                setLogsPageSize(size);
+                setLogsPage(1);
+              }}
+              totalRecords={totalLogsRecords}
+              startIndex={logsStartIndex}
+              endIndex={logsEndIndex}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

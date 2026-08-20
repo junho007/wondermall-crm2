@@ -776,26 +776,31 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
                   </div>
                 </div>
 
-                {/* 4 Metrics Summary Grid: Successful Orders, Total Placed, LTV, Last Order */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 border-t border-slate-200 text-center">
-                  <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200">
-                    <span className="text-[10px] uppercase font-extrabold text-emerald-700 block">Successful Orders</span>
+                {/* 5 Metrics Summary Grid: Successful, Total, SMS/WA, Lifetime Spent (LTV), Last Order */}
+                <div className="flex flex-wrap sm:flex-nowrap items-stretch gap-2 pt-2 border-t border-slate-200 text-center">
+                  <div className="w-[calc(50%-4px)] sm:w-20 lg:w-24 shrink-0 py-2 px-1.5 rounded-lg bg-emerald-50 border border-emerald-200 flex flex-col justify-center">
+                    <span className="text-[10px] uppercase font-extrabold text-emerald-700 block truncate">Successful</span>
                     <span className="text-base sm:text-lg font-black text-emerald-950">{selectedCustomer.successfulOrderCount}</span>
                   </div>
 
-                  <div className="p-2.5 rounded-lg bg-blue-50 border border-blue-200">
-                    <span className="text-[10px] uppercase font-extrabold text-blue-700 block">Total Placed</span>
+                  <div className="w-[calc(50%-4px)] sm:w-20 lg:w-24 shrink-0 py-2 px-1.5 rounded-lg bg-blue-50 border border-blue-200 flex flex-col justify-center">
+                    <span className="text-[10px] uppercase font-extrabold text-blue-700 block truncate">Total</span>
                     <span className="text-base sm:text-lg font-black text-blue-950">{selectedCustomer.orderCount}</span>
                   </div>
 
-                  <div className="p-2.5 rounded-lg bg-slate-100 border border-slate-200">
-                    <span className="text-[10px] uppercase font-extrabold text-slate-700 block">Lifetime Spent (LTV)</span>
+                  <div className="w-[calc(50%-4px)] sm:w-20 lg:w-24 shrink-0 py-2 px-1.5 rounded-lg bg-purple-50 border border-purple-200 flex flex-col justify-center">
+                    <span className="text-[10px] uppercase font-extrabold text-purple-700 block truncate">SMS/WA</span>
+                    <span className="text-base sm:text-lg font-black text-purple-950">{customerOutreachLogs.length}</span>
+                  </div>
+
+                  <div className="flex-1 min-w-[130px] py-2 px-2.5 rounded-lg bg-slate-100 border border-slate-200 flex flex-col justify-center">
+                    <span className="text-[10px] uppercase font-extrabold text-slate-700 block truncate">Lifetime Spent</span>
                     <span className="text-base sm:text-lg font-black font-mono text-emerald-900">{maskPrice(selectedCustomer.totalSpent, userRole, (val) => `RM ${val.toFixed(2)}`)}</span>
                   </div>
 
-                  <div className="p-2.5 rounded-lg bg-slate-100 border border-slate-200">
-                    <span className="text-[10px] uppercase font-extrabold text-slate-600 block">Last Order Date</span>
-                    <span className="text-xs font-bold font-mono text-slate-800 mt-1 block truncate">{selectedCustomer.lastOrderDate || 'N/A'}</span>
+                  <div className="flex-1 min-w-[130px] py-2 px-2.5 rounded-lg bg-slate-100 border border-slate-200 flex flex-col justify-center">
+                    <span className="text-[10px] uppercase font-extrabold text-slate-600 block truncate">Last Order</span>
+                    <span className="text-xs font-bold font-mono text-slate-800 mt-0.5 block truncate">{selectedCustomer.lastOrderDate || 'N/A'}</span>
                   </div>
                 </div>
               </div>
