@@ -28,6 +28,12 @@ export default async function handler(req, res) {
       if (!logs || logs.length === 0) {
         logs = globalThis.__shopeeSmsLogs || [];
       }
+      if (Array.isArray(logs)) {
+        logs = logs.map((l) => ({
+          ...l,
+          recipientPhone: (l.recipientPhone || '').replace(/^\+/, '').replace(/\s+/g, ''),
+        }));
+      }
       if (!settings.apiKey && globalThis.__shopeeSmsSettings) {
         settings = globalThis.__shopeeSmsSettings;
       }
@@ -72,9 +78,9 @@ export default async function handler(req, res) {
         const effectiveSender = 'WCGMall';
 
         // Format phone number: remove leading plus or non-digits, e.g. +60109223278 -> 60109223278
-        let cleanPhone = (recipientPhone || '').replace(/\s+/g, '');
-        if (cleanPhone.startsWith('+')) {
-          cleanPhone = cleanPhone.substring(1);
+        let cleanPhone = (recipientPhone || '').replace(/\D/g, '');
+        if (cleanPhone.startsWith('0')) {
+          cleanPhone = '60' + cleanPhone.substring(1);
         }
 
         let moviderResponse = null;
@@ -115,7 +121,7 @@ export default async function handler(req, res) {
         const newLog = {
           id: `sms-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
           recipientName: recipientName || 'Shopee Buyer',
-          recipientPhone,
+          recipientPhone: cleanPhone,
           messageText,
           senderId: effectiveSender,
           sentTime: new Date().toISOString(),

@@ -114,7 +114,17 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
   const [customTestRecipients, setCustomTestRecipients] = useState<CustomTestRecipient[]>(() => {
     try {
       const saved = localStorage.getItem('wm_custom_test_recipients');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed: CustomTestRecipient[] = JSON.parse(saved);
+        return parsed.map((item) => {
+          let clean = (item.phone || '').replace(/\D/g, '');
+          if (clean.startsWith('0')) clean = '60' + clean.substring(1);
+          return {
+            ...item,
+            phone: clean,
+          };
+        });
+      }
     } catch (e) {
       console.error('Failed to load custom recipients', e);
     }
@@ -216,15 +226,13 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
       return;
     }
 
-    let cleanPhone = trimmedPhone;
+    let cleanPhone = trimmedPhone.replace(/\D/g, '');
     if (cleanPhone.startsWith('0')) {
-      cleanPhone = '+60' + cleanPhone.substring(1);
-    } else if (!cleanPhone.startsWith('+') && cleanPhone.startsWith('60')) {
-      cleanPhone = '+' + cleanPhone;
+      cleanPhone = '60' + cleanPhone.substring(1);
     }
 
     const testId = `custom_${Date.now()}`;
-    const testUsername = `custom_${cleanPhone.replace(/[^\d]/g, '')}`;
+    const testUsername = `custom_${cleanPhone}`;
     const newTest: CustomTestRecipient = {
       id: testId,
       name: trimmedName,
@@ -1570,7 +1578,9 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders }) 
                       {new Date(log.sentTime).toLocaleString('en-GB')}
                     </td>
                     <td className="py-2.5 px-3 font-bold text-slate-900">{log.recipientName}</td>
-                    <td className="py-2.5 px-3 font-mono font-bold text-slate-800">{log.recipientPhone}</td>
+                    <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
+                      {(log.recipientPhone || '').replace(/^\+/, '').replace(/\s+/g, '')}
+                    </td>
                     <td className="py-2.5 px-3 text-slate-600 max-w-xs truncate" title={log.messageText}>
                       {log.messageText}
                     </td>
