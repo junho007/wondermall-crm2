@@ -52,8 +52,10 @@ const sanitizeOrdersList = (rawList: ShopeeOrder[]): ShopeeOrder[] => {
   const map = new Map<string, ShopeeOrder>();
   rawList.forEach((item) => {
     if (!item.orderSn) return;
+    const computedQty = item.quantity || (item.items?.reduce((sum, it) => sum + (it.quantity || 1), 0)) || 1;
     map.set(item.orderSn, {
       ...item,
+      quantity: computedQty,
       orderStatus: sanitizeOrderStatus(item.orderStatus),
     });
   });
@@ -91,6 +93,8 @@ const saveCustomEditsToStorage = (updatedOrders: ShopeeOrder[]) => {
           adsEscrowFee: o.adsEscrowFee,
           serviceFee: o.serviceFee,
           escrowAmount: o.escrowAmount,
+          quantity: o.quantity,
+          items: o.items,
         };
       }
     });
@@ -480,11 +484,44 @@ export default function App() {
             const netIncome = o.escrow_amount != null ? parseFloat(o.escrow_amount) : 0;
             const parsedPhone = recipientAddr?.phone || recipientAddr?.mobile || o.buyer_phone || '';
 
+            // Map individual items and calculate accurate total units
+            const rawItemsList = Array.isArray(o.items) ? o.items : [];
+            const mappedItems: OrderItem[] = rawItemsList.map((item: any) => {
+              const itemQty = Number(item.model_quantity_purchased ?? item.quantity ?? 1) || 1;
+              const origPrice = parseFloat(item.model_original_price ?? item.retailPrice ?? item.original_price) || 0;
+              const discPrice = parseFloat(item.model_discounted_price ?? item.paidAmount ?? item.model_original_price ?? origPrice) || 0;
+              return {
+                name: item.item_name || item.name || 'Shopee Store Item',
+                variation: item.model_name || item.variation || undefined,
+                retailPrice: origPrice,
+                paidAmount: discPrice,
+                quantity: itemQty,
+                sku: item.model_sku || item.item_sku || item.sku || undefined,
+                itemId: item.item_id ? String(item.item_id) : undefined,
+              };
+            });
+
+            const totalQuantity = Number(o.total_quantity) ||
+              (mappedItems.length > 0
+                ? mappedItems.reduce((acc, it) => acc + (it.quantity || 1), 0)
+                : (Number(o.item_count) || 1));
+
+            // Generate clean product name with variations if multiple items exist
+            let orderProductName = o.items?.[0]?.item_name || 'Shopee Store Order Item';
+            if (mappedItems.length > 1) {
+              const uniqueNames = Array.from(new Set(mappedItems.map((i) => i.name)));
+              const varList = mappedItems.map((i) => (i.variation ? `${i.variation} (x${i.quantity || 1})` : i.name)).filter(Boolean).join(', ');
+              orderProductName = `${uniqueNames[0]} (${mappedItems.length} items: ${varList})`;
+            } else if (mappedItems.length === 1 && mappedItems[0].variation) {
+              orderProductName = `${mappedItems[0].name} [Variation: ${mappedItems[0].variation}]`;
+            }
+
             const mappedOrder: ShopeeOrder = {
               id: `shopee-live-${o.order_sn || idx}`,
               orderSn: o.order_sn,
               buyerUsername: o.buyer_username || 'Shopee Customer',
-              productName: o.items?.[0]?.item_name || 'Shopee Store Order Item',
+              productName: orderProductName,
+              items: mappedItems.length > 0 ? mappedItems : undefined,
               totalAmount: totalAmt,
               rawTotalAmount: `${o.currency || 'RM'} ${o.total_amount}`,
               costOfGoodsSold: merchandiseSubtotal > 0 ? merchandiseSubtotal : totalAmt,
@@ -505,8 +542,9 @@ export default function App() {
               shipTime: o.ship_time || o.shipTime || undefined,
               deliveryTime: o.delivery_time || o.deliveryTime || undefined,
               isApiSynced: true,
+              channel: 'Shopee',
               paymentMethod: 'ShopeePay / Online Banking',
-              quantity: o.item_count || 1,
+              quantity: totalQuantity,
               shippingAddress: locationDisplay,
               buyerName: recipientAddr?.name || o.buyer_username || 'Shopee Customer',
               recipientName: recipientAddr?.name || '',
@@ -538,6 +576,8 @@ export default function App() {
                 adsEscrowFee: custom.adsEscrowFee ?? o.adsEscrowFee,
                 serviceFee: custom.serviceFee ?? o.serviceFee,
                 escrowAmount: custom.escrowAmount ?? o.escrowAmount,
+                quantity: custom.quantity || o.quantity,
+                items: (custom.items && custom.items.length > 0) ? custom.items : o.items,
               };
             }
             return o;

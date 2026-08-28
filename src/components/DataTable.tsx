@@ -539,9 +539,16 @@ export const DataTable: React.FC<DataTableProps> = ({
                           }
 
                           if (col.key === 'quantity') {
+                            const totalQty = order.quantity || (order.items?.reduce((sum, it) => sum + (it.quantity || 1), 0)) || 1;
                             return (
-                              <td key={col.key} className={`${cellPadding} text-center font-bold text-slate-900 font-mono`}>
-                                {order.quantity || 1}
+                              <td key={col.key} className={`${cellPadding} text-center whitespace-nowrap`}>
+                                {totalQty > 1 ? (
+                                  <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-md bg-blue-50 text-blue-800 border border-blue-200 font-extrabold font-mono text-xs">
+                                    {totalQty}
+                                  </span>
+                                ) : (
+                                  <span className="font-bold text-slate-700 font-mono text-xs">{totalQty}</span>
+                                )}
                               </td>
                             );
                           }

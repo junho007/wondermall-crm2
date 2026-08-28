@@ -124,58 +124,84 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onC
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto space-y-5 text-xs sm:text-sm text-slate-700">
           {/* Product Banner & Items Breakdown */}
-          <div className="p-4 rounded-xl bg-blue-50/70 border border-blue-200 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-blue-800 uppercase tracking-wider flex items-center gap-1.5">
-                <ShoppingBag className="w-4 h-4 text-blue-600" />
-                Purchased Digital Asset ({order.items && order.items.length > 1 ? `${order.items.length} Product Variants` : '1 Item'})
-              </span>
-              <span className="text-lg sm:text-xl font-black font-mono text-slate-900">
-                {maskPrice(getMerchandiseGmv(order), userRole, (v) => `RM ${v.toFixed(2)}`)}
-              </span>
-            </div>
-            <p className="text-sm sm:text-base font-bold text-slate-900 leading-relaxed">{order.productName}</p>
+          {(() => {
+            const totalUnits = order.quantity || (order.items?.reduce((acc, it) => acc + (it.quantity || 1), 0)) || 1;
+            const itemsCountLabel = order.items && order.items.length > 1
+              ? `${order.items.length} Product Variants (${totalUnits} Total Units)`
+              : `${totalUnits} ${totalUnits === 1 ? 'Item' : 'Items'}`;
 
-            {/* Individual Item Variants List */}
-            {order.items && order.items.length > 0 && (
-              <div className="pt-2 border-t border-blue-200/80 space-y-2">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-blue-900 block">
-                  Order Line Items & Variant Breakdown:
-                </span>
-                <div className="space-y-2">
-                  {order.items.map((item, idx) => (
-                    <div key={idx} className="p-2.5 rounded-lg bg-white border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-slate-900 text-xs sm:text-sm">{item.name}</span>
-                          {item.variation && (
-                            <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-extrabold border border-blue-300">
-                              Variation: {item.variation}
-                            </span>
-                          )}
-                        </div>
-                        {item.sku && (
-                          <div className="text-[11px] font-mono text-slate-500 flex items-center gap-1">
-                            <span>SKU / Line ID:</span>
-                            <span className="font-bold text-slate-700">{item.sku}</span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3 shrink-0 self-end sm:self-center text-xs">
-                        {item.discount && item.discount > 0 ? (
-                          <span className="text-slate-500 line-through text-[11px]">RM {item.retailPrice?.toFixed(2)}</span>
-                        ) : null}
-                        <span className="font-mono font-black text-slate-900 bg-slate-100 px-2 py-1 rounded border border-slate-200">
-                          {maskPrice(item.paidAmount || 0, userRole, (v) => `RM ${v.toFixed(2)}`)}
-                        </span>
-                        <span className="text-slate-500 font-bold">x{item.quantity || 1}</span>
-                      </div>
-                    </div>
-                  ))}
+            return (
+              <div className="p-4 rounded-xl bg-blue-50/70 border border-blue-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-blue-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <ShoppingBag className="w-4 h-4 text-blue-600" />
+                    Purchased Digital Asset ({itemsCountLabel})
+                  </span>
+                  <div className="text-right">
+                    <span className="text-lg sm:text-xl font-black font-mono text-slate-900 block">
+                      {maskPrice(getMerchandiseGmv(order), userRole, (v) => `RM ${v.toFixed(2)}`)}
+                    </span>
+                    {order.orderStatus === 'Cancelled' && (
+                      <span className="text-[10px] text-rose-600 font-extrabold uppercase tracking-wider">
+                        Cancelled Order (RM 0.00 Escrow)
+                      </span>
+                    )}
+                  </div>
                 </div>
+                <p className="text-sm sm:text-base font-bold text-slate-900 leading-relaxed">{order.productName}</p>
+
+                {/* Individual Item Variants List */}
+                {order.items && order.items.length > 0 && (
+                  <div className="pt-2 border-t border-blue-200/80 space-y-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-blue-900 block">
+                      Order Line Items &amp; Variant Breakdown:
+                    </span>
+                    <div className="space-y-2">
+                      {order.items.map((item, idx) => {
+                        const itemQty = item.quantity || 1;
+                        const unitPrice = item.retailPrice || (item.paidAmount ? item.paidAmount / itemQty : 0);
+                        const lineTotal = item.paidAmount || (unitPrice * itemQty);
+
+                        return (
+                          <div key={idx} className="p-2.5 rounded-lg bg-white border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
+                            <div className="space-y-0.5 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-slate-900 text-xs sm:text-sm">{item.name}</span>
+                                {item.variation && (
+                                  <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-extrabold border border-blue-300">
+                                    Variation: {item.variation}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3 text-[11px] text-slate-500 font-mono flex-wrap">
+                                {unitPrice > 0 && (
+                                  <span>Unit Price: <strong className="text-slate-800">RM {unitPrice.toFixed(2)}</strong></span>
+                                )}
+                                {item.sku && (
+                                  <span>SKU: <strong className="text-slate-700">{item.sku}</strong></span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0 self-end sm:self-center text-xs">
+                              {item.discount && item.discount > 0 ? (
+                                <span className="text-slate-500 line-through text-[11px]">RM {(unitPrice * itemQty).toFixed(2)}</span>
+                              ) : null}
+                              <span className="font-mono font-black text-slate-900 bg-slate-100 px-2.5 py-1 rounded border border-slate-200">
+                                {maskPrice(lineTotal, userRole, (v) => `RM ${v.toFixed(2)}`)}
+                              </span>
+                              <span className="px-2.5 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 font-extrabold text-xs">
+                                Qty: {itemQty}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            );
+          })()}
 
           {/* Key Details Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -224,7 +250,9 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onC
             {/* Quantity */}
             <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
               <span className="text-[11px] font-bold uppercase text-slate-500">Quantity Units</span>
-              <p className="text-xs sm:text-sm font-bold text-slate-800">{order.quantity || 1} Unit(s)</p>
+              <p className="text-xs sm:text-sm font-bold text-slate-800">
+                {order.quantity || (order.items?.reduce((sum, it) => sum + (it.quantity || 1), 0)) || 1} Unit(s)
+              </p>
             </div>
           </div>
 

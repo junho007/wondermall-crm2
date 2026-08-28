@@ -363,20 +363,45 @@ function formatShopeeEpochToMytString(epochSeconds) {
 
       const payOrCreateTime = order.pay_time || order.create_time;
 
+      const rawItemList = Array.isArray(order.item_list) ? order.item_list : [];
+      const totalPurchasedQty = rawItemList.reduce((sum, item) => {
+        const q = Number(item.model_quantity_purchased ?? item.quantity_purchased ?? item.quantity ?? 1);
+        return sum + (isNaN(q) || q <= 0 ? 1 : q);
+      }, 0) || (rawItemList.length > 0 ? rawItemList.length : 1);
+
+      const mappedItems = rawItemList.map(item => {
+        const qty = Number(item.model_quantity_purchased ?? item.quantity_purchased ?? item.quantity ?? 1) || 1;
+        const origPrice = item.model_original_price != null ? Number(item.model_original_price) : (item.original_price != null ? Number(item.original_price) : null);
+        const discPrice = item.model_discounted_price != null ? Number(item.model_discounted_price) : (item.discounted_price != null ? Number(item.discounted_price) : origPrice);
+
+        return {
+          item_id: item.item_id,
+          item_name: item.item_name,
+          name: item.item_name,
+          model_id: item.model_id,
+          model_name: item.model_name || item.variation || null,
+          variation: item.model_name || item.variation || null,
+          model_sku: item.model_sku || item.item_sku || null,
+          sku: item.model_sku || item.item_sku || null,
+          model_quantity_purchased: qty,
+          quantity: qty,
+          model_original_price: origPrice,
+          model_discounted_price: discPrice,
+          retailPrice: origPrice,
+          paidAmount: discPrice
+        };
+      });
+
       return {
         order_sn: sn,
         order_status: order.order_status || 'READY_TO_SHIP',
         total_amount: order.total_amount ? Number(order.total_amount).toFixed(2) : '0.00',
         currency: order.currency || 'MYR',
         buyer_username: order.buyer_username || `Buyer_${order.buyer_user_id || 'Shopee'}`,
-        item_count: order.item_list?.length || 1,
+        item_count: totalPurchasedQty,
+        total_quantity: totalPurchasedQty,
         recipient_address: order.recipient_address || null,
-        items: order.item_list?.map(item => ({
-          item_id: item.item_id,
-          item_name: item.item_name,
-          model_quantity: item.model_quantity_purchased,
-          model_original_price: item.model_original_price
-        })) || [],
+        items: mappedItems,
         create_time: formatShopeeEpochToMytString(payOrCreateTime),
         pay_time: formatShopeeEpochToMytString(payOrCreateTime),
         ship_time: order.ship_time ? formatShopeeEpochToMytString(order.ship_time) : null,
