@@ -285,19 +285,27 @@ export function cleanPhoneNumber(phone?: string): string {
   return phone.replace(/\D/g, '');
 }
 
+export const CUSTOMER_INTELLIGENCE_REGISTRY_KEY = 'wm_customer_intelligence_registry_v1';
+export const LOCAL_STORAGE_CUSTOM_EDITS_KEY = 'wm_shopee_orders_custom_edits_v1';
+
 export function isMaskedString(val?: string | null): boolean {
   if (!val) return true;
   const trimmed = String(val).trim();
   if (
     trimmed === '' ||
     trimmed === 'N/A' ||
+    trimmed === 'n/a' ||
     trimmed === 'Hidden' ||
     trimmed === 'Customer' ||
     trimmed === 'Shopee Customer' ||
+    trimmed === 'Lazada Customer' ||
+    trimmed === 'Platform Customer' ||
     trimmed === 'Guest' ||
     trimmed === 'Guest Customer' ||
+    trimmed === 'Digital Asset Top-Up Buyer' ||
     trimmed === 'undefined' ||
-    trimmed === 'null'
+    trimmed === 'null' ||
+    trimmed.startsWith('Buyer_')
   ) {
     return true;
   }
@@ -323,6 +331,27 @@ export interface CustomerIntelligenceProfile {
   buyerPhone?: string;
   recipientPhone?: string;
   shippingAddress?: string;
+  lastUpdated?: string;
+}
+
+export function getCustomerIntelligenceRegistry(): Record<string, CustomerIntelligenceProfile> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(CUSTOMER_INTELLIGENCE_REGISTRY_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) || {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveCustomerIntelligenceRegistry(registry: Record<string, CustomerIntelligenceProfile>): void {
+  if (typeof window === 'undefined' || !registry) return;
+  try {
+    localStorage.setItem(CUSTOMER_INTELLIGENCE_REGISTRY_KEY, JSON.stringify(registry));
+  } catch (err) {
+    console.warn('Failed to save customer registry to localStorage:', err);
+  }
 }
 
 /**
@@ -336,6 +365,18 @@ export function enrichOrdersWithCustomerIntelligence(orders: ShopeeOrder[]): Sho
   // Map by normalized username and clean phone number
   const userProfileMap = new Map<string, CustomerIntelligenceProfile>();
   const phoneProfileMap = new Map<string, CustomerIntelligenceProfile>();
+
+  // Seed with persisted customer intelligence registry
+  const persistentRegistry = getCustomerIntelligenceRegistry();
+  Object.entries(persistentRegistry).forEach(([userKey, prof]) => {
+    if (userKey && prof) {
+      userProfileMap.set(userKey, { ...prof });
+      const cleanPh = cleanPhoneNumber(prof.buyerPhone || prof.recipientPhone);
+      if (cleanPh.length >= 8) {
+        phoneProfileMap.set(cleanPh, { ...prof });
+      }
+    }
+  });
 
   const updateProfile = (profile: CustomerIntelligenceProfile, o: ShopeeOrder) => {
     if (!isMaskedString(o.buyerName)) {
@@ -385,33 +426,56 @@ export function enrichOrdersWithCustomerIntelligence(orders: ShopeeOrder[]): Sho
     }
   });
 
-  // Also check if there is custom edits in localStorage
+  // Also check if there are custom edits in localStorage (check both current and legacy keys)
   if (typeof window !== 'undefined') {
     try {
-      const savedEdits = localStorage.getItem('shopee_custom_order_edits_v1');
-      if (savedEdits) {
-        const editsObj: Record<string, Partial<ShopeeOrder>> = JSON.parse(savedEdits);
-        Object.values(editsObj).forEach((edit) => {
-          if (edit.buyerUsername) {
-            const normUser = normalizeBuyerUsername(edit.buyerUsername);
-            if (normUser) {
-              let profile = userProfileMap.get(normUser);
-              if (!profile) {
-                profile = {};
-                userProfileMap.set(normUser, profile);
-              }
+      const editKeys = [LOCAL_STORAGE_CUSTOM_EDITS_KEY, 'shopee_custom_order_edits_v1'];
+      for (const editKey of editKeys) {
+        const savedEdits = localStorage.getItem(editKey);
+        if (savedEdits) {
+          const editsObj: Record<string, Partial<ShopeeOrder>> = JSON.parse(savedEdits);
+          Object.values(editsObj).forEach((edit) => {
+            const rawUser = edit.buyerUsername || '';
+            const normUser = normalizeBuyerUsername(rawUser);
+            const cleanPh = cleanPhoneNumber(edit.buyerPhone || edit.recipientPhone);
+
+            let profile = normUser ? userProfileMap.get(normUser) : undefined;
+            if (!profile && cleanPh.length >= 8) {
+              profile = phoneProfileMap.get(cleanPh);
+            }
+            if (!profile && normUser) {
+              profile = {};
+              userProfileMap.set(normUser, profile);
+            }
+
+            if (profile) {
               if (!isMaskedString(edit.buyerName)) profile.buyerName = edit.buyerName;
               if (!isMaskedString(edit.recipientName)) profile.recipientName = edit.recipientName;
               if (!isMaskedString(edit.buyerPhone)) profile.buyerPhone = edit.buyerPhone;
               if (!isMaskedString(edit.recipientPhone)) profile.recipientPhone = edit.recipientPhone;
               if (!isMaskedString(edit.shippingAddress)) profile.shippingAddress = edit.shippingAddress;
+              if (!isMaskedString(edit.buyerUsername)) profile.buyerUsername = edit.buyerUsername;
             }
-          }
-        });
+          });
+        }
       }
     } catch {
       // Ignore localStorage read errors
     }
+  }
+
+  // Update persistent registry with any freshly discovered unmasked profiles
+  let hasNewProfiles = false;
+  userProfileMap.forEach((prof, userKey) => {
+    if (!isMaskedString(prof.buyerName) || !isMaskedString(prof.buyerPhone) || !isMaskedString(prof.shippingAddress)) {
+      if (!persistentRegistry[userKey] || persistentRegistry[userKey].buyerName !== prof.buyerName) {
+        persistentRegistry[userKey] = { ...persistentRegistry[userKey], ...prof, lastUpdated: new Date().toISOString() };
+        hasNewProfiles = true;
+      }
+    }
+  });
+  if (hasNewProfiles) {
+    saveCustomerIntelligenceRegistry(persistentRegistry);
   }
 
   // Pass 2: Enrich all orders with known customer intelligence
@@ -421,7 +485,8 @@ export function enrichOrdersWithCustomerIntelligence(orders: ShopeeOrder[]): Sho
 
     const profile =
       (normUser ? userProfileMap.get(normUser) : undefined) ||
-      (cleanPh.length >= 8 ? phoneProfileMap.get(cleanPh) : undefined);
+      (cleanPh.length >= 8 ? phoneProfileMap.get(cleanPh) : undefined) ||
+      (normUser ? persistentRegistry[normUser] : undefined);
 
     if (!profile) return o;
 

@@ -19,14 +19,26 @@ import { TeamMembersModal } from './components/TeamMembersModal';
 import { SmsMarketingPanel } from './components/SmsMarketingPanel';
 import { ChannelTabs, ChannelType } from './components/ChannelTabs';
 import { IncomeOverviewCard } from './components/IncomeOverviewCard';
-import { parseCSVString, exportOrdersToCSV, calculateNetIncome, getOrInferChannel, mergeOrderArrays, enrichOrdersWithCustomerIntelligence } from './utils/csvHelper';
+import {
+  parseCSVString,
+  exportOrdersToCSV,
+  calculateNetIncome,
+  getOrInferChannel,
+  mergeOrderArrays,
+  mergeTwoOrders,
+  enrichOrdersWithCustomerIntelligence,
+  getCustomerIntelligenceRegistry,
+  saveCustomerIntelligenceRegistry,
+  isMaskedString,
+  normalizeBuyerUsername,
+  LOCAL_STORAGE_CUSTOM_EDITS_KEY,
+} from './utils/csvHelper';
 import { getStateFromAddress, inferCountryFromAddress } from './utils/addressHelper';
 import { inferBuyerRace } from './utils/raceHelper';
 import { SAMPLE_SHOPEE_CSV, INITIAL_COLUMNS } from './data/sampleData';
 import { ShopeeOrder, OrderItem, SortConfig, ColumnDefinition, DatePreset, UserRole } from './types';
 import { CheckCircle2, Upload, Key, Users as UsersIcon, ShieldAlert, FileSpreadsheet, Type, Sliders, Bell, Lock, Shield, Database, Download, RefreshCw, Clock, Smartphone, Check, Globe, Palette, EyeOff, Save, RotateCcw, AlertTriangle } from 'lucide-react';
 
-const LOCAL_STORAGE_CUSTOM_EDITS_KEY = 'wm_shopee_orders_custom_edits_v1';
 const LOCAL_STORAGE_COLUMNS_KEY = 'wm_shopee_orders_columns_v1';
 const LOCAL_STORAGE_FULL_ORDERS_KEY = 'wm_shopee_orders_full_v1';
 
@@ -75,30 +87,54 @@ const getCustomEditsFromStorage = (): Record<string, Partial<ShopeeOrder>> => {
 
 const saveCustomEditsToStorage = (updatedOrders: ShopeeOrder[]) => {
   try {
-    const editsMap: Record<string, Partial<ShopeeOrder>> = {};
+    const editsMap = getCustomEditsFromStorage();
+    const customerRegistry = getCustomerIntelligenceRegistry();
+
     updatedOrders.forEach((o) => {
-      if (!isSampleOrder(o) && !isDummySnOrder(o)) {
-        editsMap[o.orderSn] = {
-          buyerName: o.buyerName,
-          recipientName: o.recipientName,
-          buyerPhone: o.buyerPhone,
-          recipientPhone: o.recipientPhone,
-          shippingAddress: o.shippingAddress,
-          orderStatus: o.orderStatus,
-          costOfGoodsSold: o.costOfGoodsSold,
-          sellerVoucherDiscount: o.sellerVoucherDiscount,
-          voucherCode: o.voucherCode,
-          commissionFee: o.commissionFee,
-          transactionFee: o.transactionFee,
-          adsEscrowFee: o.adsEscrowFee,
-          serviceFee: o.serviceFee,
-          escrowAmount: o.escrowAmount,
-          quantity: o.quantity,
-          items: o.items,
+      if (!isSampleOrder(o) && !isDummySnOrder(o) && o.orderSn) {
+        const existingEdit = editsMap[o.orderSn] || {};
+
+        // Only save unmasked values so masked API data never overwrites known edits
+        const safeEdit: Partial<ShopeeOrder> = {
+          ...existingEdit,
+          orderSn: o.orderSn,
+          buyerUsername: !isMaskedString(o.buyerUsername) ? o.buyerUsername : existingEdit.buyerUsername,
+          buyerName: !isMaskedString(o.buyerName) ? o.buyerName : existingEdit.buyerName,
+          recipientName: !isMaskedString(o.recipientName) ? o.recipientName : existingEdit.recipientName,
+          buyerPhone: !isMaskedString(o.buyerPhone) ? o.buyerPhone : existingEdit.buyerPhone,
+          recipientPhone: !isMaskedString(o.recipientPhone) ? o.recipientPhone : existingEdit.recipientPhone,
+          shippingAddress: !isMaskedString(o.shippingAddress) ? o.shippingAddress : existingEdit.shippingAddress,
+          orderStatus: o.orderStatus || existingEdit.orderStatus,
+          costOfGoodsSold: o.costOfGoodsSold !== undefined ? o.costOfGoodsSold : existingEdit.costOfGoodsSold,
+          sellerVoucherDiscount: o.sellerVoucherDiscount !== undefined ? o.sellerVoucherDiscount : existingEdit.sellerVoucherDiscount,
+          voucherCode: o.voucherCode || existingEdit.voucherCode,
+          commissionFee: o.commissionFee !== undefined ? o.commissionFee : existingEdit.commissionFee,
+          transactionFee: o.transactionFee !== undefined ? o.transactionFee : existingEdit.transactionFee,
+          adsEscrowFee: o.adsEscrowFee !== undefined ? o.adsEscrowFee : existingEdit.adsEscrowFee,
+          serviceFee: o.serviceFee !== undefined ? o.serviceFee : existingEdit.serviceFee,
+          escrowAmount: o.escrowAmount !== undefined ? o.escrowAmount : existingEdit.escrowAmount,
+          quantity: o.quantity || existingEdit.quantity,
+          items: o.items || existingEdit.items,
         };
+        editsMap[o.orderSn] = safeEdit;
+
+        // Register customer intelligence permanently
+        const normUser = normalizeBuyerUsername(o.buyerUsername);
+        if (normUser && normUser !== 'guest' && normUser !== 'shopee_user') {
+          const currentProfile = customerRegistry[normUser] || {};
+          if (!isMaskedString(o.buyerName)) currentProfile.buyerName = o.buyerName;
+          if (!isMaskedString(o.recipientName)) currentProfile.recipientName = o.recipientName;
+          if (!isMaskedString(o.buyerPhone)) currentProfile.buyerPhone = o.buyerPhone;
+          if (!isMaskedString(o.recipientPhone)) currentProfile.recipientPhone = o.recipientPhone;
+          if (!isMaskedString(o.shippingAddress)) currentProfile.shippingAddress = o.shippingAddress;
+          if (!isMaskedString(o.buyerUsername)) currentProfile.buyerUsername = o.buyerUsername;
+          customerRegistry[normUser] = currentProfile;
+        }
       }
     });
+
     localStorage.setItem(LOCAL_STORAGE_CUSTOM_EDITS_KEY, JSON.stringify(editsMap));
+    saveCustomerIntelligenceRegistry(customerRegistry);
   } catch (err) {
     console.warn('Failed to save custom edits to storage:', err);
   }
@@ -112,11 +148,13 @@ const syncOrdersToKvAndStorage = async (updatedOrders: ShopeeOrder[]) => {
     }
     saveCustomEditsToStorage(updatedOrders);
 
-    // Save to Vercel KV server endpoint
+    const customerRegistry = getCustomerIntelligenceRegistry();
+
+    // Save to Vercel KV server endpoint with customerRegistry
     await fetch('/api/save-merged-orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orders: updatedOrders }),
+      body: JSON.stringify({ orders: updatedOrders, customerRegistry }),
     });
   } catch (err) {
     console.warn('Failed to sync orders to KV or LocalStorage:', err);
@@ -375,17 +413,18 @@ export default function App() {
     fetch('/api/save-merged-orders')
       .then((res) => res.json())
       .then((data) => {
-        if (data.orders && Array.isArray(data.orders) && data.orders.length > 0) {
+        if (data && data.customerRegistry) {
+          const localReg = getCustomerIntelligenceRegistry();
+          const mergedReg = { ...localReg, ...data.customerRegistry };
+          saveCustomerIntelligenceRegistry(mergedReg);
+        }
+        if (data && data.orders && Array.isArray(data.orders) && data.orders.length > 0) {
           const sanitizedServerOrders = sanitizeOrdersList(data.orders.filter((o: ShopeeOrder) => !isSampleOrder(o)));
           if (sanitizedServerOrders.length > 0) {
             setOrders((prev) => {
               const nonSamplePrev = prev.filter((o) => !isSampleOrder(o) && !isDummySnOrder(o));
-              const map = new Map<string, ShopeeOrder>();
-              nonSamplePrev.forEach((o) => { if (o.orderSn) map.set(o.orderSn, o); });
-              sanitizedServerOrders.forEach((sOrder: ShopeeOrder) => {
-                if (sOrder.orderSn) map.set(sOrder.orderSn, sOrder);
-              });
-              const finalList = sanitizeOrdersList(Array.from(map.values()));
+              const mergedList = mergeOrderArrays(nonSamplePrev, sanitizedServerOrders);
+              const finalList = sanitizeOrdersList(mergedList);
               syncOrdersToKvAndStorage(finalList);
               return finalList;
             });
@@ -585,23 +624,8 @@ export default function App() {
 
           setOrders((prev) => {
             const nonSamplePrev = prev.filter((o) => !isSampleOrder(o) && !isDummySnOrder(o));
-            const existingMap = new Map<string, ShopeeOrder>();
-            nonSamplePrev.forEach((o) => {
-              if (o.orderSn) existingMap.set(o.orderSn, o);
-            });
-
-            const mergedList = [...nonSamplePrev];
-            mergedWithEdits.forEach((liveOrder) => {
-              if (liveOrder.orderSn && existingMap.has(liveOrder.orderSn)) {
-                const idx = mergedList.findIndex((o) => o.orderSn === liveOrder.orderSn);
-                if (idx !== -1) {
-                  mergedList[idx] = { ...mergedList[idx], ...liveOrder };
-                }
-              } else {
-                mergedList.unshift(liveOrder);
-              }
-            });
-
+            // Use safe unmasked merge helper so existing Excel buyer details are never replaced by API masked values
+            const mergedList = mergeOrderArrays(nonSamplePrev, mergedWithEdits);
             const cleanedFinal = sanitizeOrdersList(mergedList);
             syncOrdersToKvAndStorage(cleanedFinal);
             return cleanedFinal;
@@ -802,49 +826,61 @@ export default function App() {
     setTimeout(() => setSyncToastMessage(null), 4000);
   };
 
+  const handleUpdateCustomer = (username: string, updatedData: { name?: string; phone?: string; address?: string }) => {
+    const normUser = normalizeBuyerUsername(username);
+    if (!normUser) return;
+
+    // 1. Update customer intelligence registry
+    const registry = getCustomerIntelligenceRegistry();
+    registry[normUser] = {
+      ...registry[normUser],
+      buyerUsername: username,
+      buyerName: updatedData.name || registry[normUser]?.buyerName,
+      recipientName: updatedData.name || registry[normUser]?.recipientName,
+      buyerPhone: updatedData.phone || registry[normUser]?.buyerPhone,
+      recipientPhone: updatedData.phone || registry[normUser]?.recipientPhone,
+      shippingAddress: updatedData.address || registry[normUser]?.shippingAddress,
+      lastUpdated: new Date().toISOString(),
+    };
+    saveCustomerIntelligenceRegistry(registry);
+
+    // 2. Propagate to all orders in memory
+    setOrders((prev) => {
+      const next = prev.map((o) => {
+        if (normalizeBuyerUsername(o.buyerUsername) === normUser) {
+          return {
+            ...o,
+            buyerName: updatedData.name || o.buyerName,
+            recipientName: updatedData.name || o.recipientName,
+            buyerPhone: updatedData.phone || o.buyerPhone,
+            recipientPhone: updatedData.phone || o.recipientPhone,
+            shippingAddress: updatedData.address || o.shippingAddress,
+          };
+        }
+        return o;
+      });
+      const cleaned = sanitizeOrdersList(next);
+      syncOrdersToKvAndStorage(cleaned);
+      return cleaned;
+    });
+
+    setSyncToastMessage(`✅ Customer profile & order records updated for @${username}`);
+    setTimeout(() => setSyncToastMessage(null), 4000);
+  };
+
   const handleDataLoaded = (rawNewOrders: ShopeeOrder[]) => {
     const newOrders = sanitizeOrdersList(rawNewOrders);
 
     setOrders((prevOrders) => {
       const nonSamplePrev = prevOrders.filter((o) => !isSampleOrder(o) && !isDummySnOrder(o));
-      const existingMap = new Map<string, ShopeeOrder>();
-      nonSamplePrev.forEach((o) => { if (o.orderSn) existingMap.set(o.orderSn, o); });
-
-      const mergedList: ShopeeOrder[] = [...nonSamplePrev];
-      newOrders.forEach((csvOrder) => {
-        if (csvOrder.orderSn && existingMap.has(csvOrder.orderSn)) {
-          const existing = existingMap.get(csvOrder.orderSn)!;
-          const merged: ShopeeOrder = {
-            ...existing,
-            buyerName: csvOrder.buyerName || existing.buyerName,
-            recipientName: csvOrder.recipientName || csvOrder.buyerName || existing.recipientName,
-            buyerPhone: csvOrder.buyerPhone || existing.buyerPhone,
-            recipientPhone: csvOrder.buyerPhone || existing.recipientPhone,
-            shippingAddress: csvOrder.shippingAddress || existing.shippingAddress,
-            orderStatus: sanitizeOrderStatus(csvOrder.orderStatus || existing.orderStatus),
-            costOfGoodsSold: csvOrder.costOfGoodsSold || existing.costOfGoodsSold,
-            sellerVoucherDiscount: csvOrder.sellerVoucherDiscount || existing.sellerVoucherDiscount,
-            voucherCode: csvOrder.voucherCode || existing.voucherCode,
-            commissionFee: csvOrder.commissionFee || existing.commissionFee,
-            transactionFee: csvOrder.transactionFee || existing.transactionFee,
-            adsEscrowFee: csvOrder.adsEscrowFee || existing.adsEscrowFee,
-            serviceFee: csvOrder.serviceFee || existing.serviceFee,
-            escrowAmount: csvOrder.escrowAmount || existing.escrowAmount,
-            productName: csvOrder.productName && csvOrder.productName !== 'Digital Asset Top-Up' ? csvOrder.productName : existing.productName,
-          };
-          const idx = mergedList.findIndex((o) => o.orderSn === csvOrder.orderSn);
-          if (idx !== -1) mergedList[idx] = merged;
-        } else {
-          mergedList.unshift(csvOrder);
-        }
-      });
-
+      // Use mergeOrderArrays to merge monthly excel data while preserving all unmasked details
+      const mergedList = mergeOrderArrays(nonSamplePrev, newOrders);
       const cleanedFinal = sanitizeOrdersList(mergedList);
       syncOrdersToKvAndStorage(cleanedFinal);
       return cleanedFinal;
     });
 
-    setSyncToastMessage(`🎉 CSV Sync Complete! Processed ${newOrders.length} order records.`);
+    setSyncToastMessage(`🎉 Merge Complete! Processed ${newOrders.length} order records with persistent customer unmasking.`);
     setTimeout(() => setSyncToastMessage(null), 6000);
 
     setSelectedStatuses(['All']);
@@ -1161,6 +1197,7 @@ export default function App() {
               orders={channelFilteredOrders}
               userRole={userRole}
               onOpenSmsTab={() => setActiveTab('sms')}
+              onUpdateCustomer={handleUpdateCustomer}
             />
           )}
 
@@ -1614,6 +1651,7 @@ export default function App() {
         order={selectedOrder}
         onClose={() => setSelectedOrder(null)}
         onUpdateOrder={handleUpdateOrder}
+        onUpdateCustomer={handleUpdateCustomer}
         userRole={userRole}
       />
 

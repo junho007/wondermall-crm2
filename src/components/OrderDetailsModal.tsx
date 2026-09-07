@@ -1,23 +1,68 @@
 import React, { useState } from 'react';
-import { X, Copy, Check, Gamepad2, CreditCard, User, ShoppingBag, Clock, Send, CheckCircle2, Phone, MapPin, Receipt, Globe, Sparkles, ArrowLeft } from 'lucide-react';
+import { X, Copy, Check, Gamepad2, CreditCard, User, ShoppingBag, Clock, Send, CheckCircle2, Phone, MapPin, Receipt, Globe, Sparkles, ArrowLeft, Edit3, Save, RotateCcw } from 'lucide-react';
 import { ShopeeOrder, UserRole } from '../types';
-import { calculateNetIncome, getTimelineTimestamps, formatMalaysiaTime, getMerchandiseGmv, adjustHoursToDateString } from '../utils/csvHelper';
+import { calculateNetIncome, getTimelineTimestamps, formatMalaysiaTime, getMerchandiseGmv, adjustHoursToDateString, isMaskedString } from '../utils/csvHelper';
 import { maskCustomerName, maskUsername, maskPhone, maskAddress, maskPrice } from '../utils/maskHelper';
 
 interface OrderDetailsModalProps {
   order: ShopeeOrder | null;
   onClose: () => void;
   onUpdateOrder?: (updatedOrder: ShopeeOrder) => void;
+  onUpdateCustomer?: (username: string, customerData: { name?: string; phone?: string; address?: string }) => void;
   onBack?: () => void;
   backLabel?: string;
   userRole?: UserRole;
 }
 
-export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, onUpdateOrder, onBack, backLabel, userRole = 'admin' }) => {
+export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, onUpdateOrder, onUpdateCustomer, onBack, backLabel, userRole = 'admin' }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
+  const [isEditingCustomer, setIsEditingCustomer] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+  const [applyToAll, setApplyToAll] = useState(true);
 
   if (!order) return null;
+
+  const startEditCustomer = () => {
+    setEditName(order.buyerName || order.recipientName || '');
+    setEditPhone(order.buyerPhone || order.recipientPhone || '');
+    setEditAddress(order.shippingAddress || '');
+    setApplyToAll(true);
+    setIsEditingCustomer(true);
+  };
+
+  const handleSaveCustomer = () => {
+    const trimmedName = editName.trim();
+    const trimmedPhone = editPhone.trim();
+    const trimmedAddress = editAddress.trim();
+
+    const updated: ShopeeOrder = {
+      ...order,
+      buyerName: trimmedName || order.buyerName,
+      recipientName: trimmedName || order.recipientName,
+      buyerPhone: trimmedPhone || order.buyerPhone,
+      recipientPhone: trimmedPhone || order.recipientPhone,
+      shippingAddress: trimmedAddress || order.shippingAddress,
+    };
+
+    if (onUpdateOrder) {
+      onUpdateOrder(updated);
+    }
+
+    if (applyToAll && onUpdateCustomer && order.buyerUsername) {
+      onUpdateCustomer(order.buyerUsername, {
+        name: trimmedName,
+        phone: trimmedPhone,
+        address: trimmedAddress,
+      });
+    }
+
+    setIsEditingCustomer(false);
+    setSyncStatusMsg('Customer details updated & unmasked! Persisted to permanent registry.');
+    setTimeout(() => setSyncStatusMsg(null), 3500);
+  };
 
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -321,31 +366,124 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onC
           })()}
 
           {/* Customer Contact & Address Info */}
-          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-            <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-              <User className="w-4 h-4 text-blue-600" /> Customer Contact &amp; Delivery Address
-            </span>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-              <div>
-                <span className="text-[10px] font-bold uppercase text-slate-500">Recipient Name</span>
-                <p className="font-bold text-slate-900">{displayBuyerName}</p>
-              </div>
-              <div>
-                <span className="text-[10px] font-bold uppercase text-slate-500">Phone Number</span>
-                <p className="font-mono font-bold text-slate-900 flex items-center gap-1">
-                  <Phone className="w-3 h-3 text-slate-400" /> {displayPhone}
-                </p>
-              </div>
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                <User className="w-4 h-4 text-blue-600" /> Customer Contact &amp; Delivery Address
+              </span>
+              {userRole === 'admin' && !isEditingCustomer && (
+                <button
+                  type="button"
+                  onClick={startEditCustomer}
+                  className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold flex items-center gap-1.5 border border-blue-200 transition-colors cursor-pointer"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>{isMaskedString(order.buyerName) ? 'Unmask / Edit Real Info' : 'Edit Customer Info'}</span>
+                </button>
+              )}
             </div>
 
-            <div className="pt-1">
-              <span className="text-[10px] font-bold uppercase text-slate-500">Full Shipping Address</span>
-              <p className="font-semibold text-slate-800 flex items-start gap-1.5 mt-0.5">
-                <MapPin className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
-                <span>{displayAddress}</span>
-              </p>
-            </div>
+            {isEditingCustomer ? (
+              <div className="space-y-3 pt-1 animate-fadeIn bg-white p-3.5 rounded-xl border border-blue-200 shadow-xs">
+                <div className="text-[11px] font-bold text-blue-900 flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Update Real Customer Contact (Will be saved permanently across syncs)</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">
+                      Recipient / Buyer Name
+                    </label>
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      placeholder="e.g. Tan Ah Kow"
+                      className="w-full px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-50 border border-slate-300 focus:border-blue-600 focus:bg-white focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">
+                      Phone Number
+                    </label>
+                    <input
+                      type="text"
+                      value={editPhone}
+                      onChange={(e) => setEditPhone(e.target.value)}
+                      placeholder="e.g. 0123456789"
+                      className="w-full px-3 py-1.5 rounded-lg text-xs font-semibold font-mono bg-slate-50 border border-slate-300 focus:border-blue-600 focus:bg-white focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">
+                    Shipping / Delivery Address
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={editAddress}
+                    onChange={(e) => setEditAddress(e.target.value)}
+                    placeholder="Full shipping address..."
+                    className="w-full px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-50 border border-slate-300 focus:border-blue-600 focus:bg-white focus:outline-none resize-none"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-3 pt-1 flex-wrap">
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={applyToAll}
+                      onChange={(e) => setApplyToAll(e.target.checked)}
+                      className="w-3.5 h-3.5 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                    />
+                    <span>Auto-apply to ALL orders for <strong className="font-mono text-blue-700">@{order.buyerUsername || 'buyer'}</strong></span>
+                  </label>
+
+                  <div className="flex items-center gap-2 ml-auto">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingCustomer(false)}
+                      className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveCustomer}
+                      className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer"
+                    >
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Save Customer Details</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-slate-500">Recipient Name</span>
+                    <p className="font-bold text-slate-900">{displayBuyerName}</p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold uppercase text-slate-500">Phone Number</span>
+                    <p className="font-mono font-bold text-slate-900 flex items-center gap-1">
+                      <Phone className="w-3 h-3 text-slate-400" /> {displayPhone}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-1">
+                  <span className="text-[10px] font-bold uppercase text-slate-500">Full Shipping Address</span>
+                  <p className="font-semibold text-slate-800 flex items-start gap-1.5 mt-0.5">
+                    <MapPin className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+                    <span>{displayAddress}</span>
+                  </p>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Financial Escrow Breakdown */}

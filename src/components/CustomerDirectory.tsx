@@ -50,6 +50,7 @@ interface CustomerDirectoryProps {
   onSelectOrder?: (order: ShopeeOrder) => void;
   userRole?: UserRole;
   onOpenSmsTab?: () => void;
+  onUpdateCustomer?: (username: string, customerData: { name?: string; phone?: string; address?: string }) => void;
 }
 
 const formatWhatsAppPhone = (rawPhone: string): string => {
@@ -67,6 +68,7 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
   orders,
   userRole = 'admin',
   onOpenSmsTab,
+  onUpdateCustomer,
 }) => {
   const [isOverviewExpanded, setIsOverviewExpanded] = useState(() => {
     try {
@@ -744,6 +746,7 @@ export const CustomerDirectory: React.FC<CustomerDirectoryProps> = ({
           userRole={userRole}
           onClose={() => setSelectedCustomerUser(null)}
           onOpenSmsTab={onOpenSmsTab}
+          onUpdateCustomer={onUpdateCustomer}
         />
       )}
     </div>
