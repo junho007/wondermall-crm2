@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import {
   MessageSquare,
@@ -40,6 +40,7 @@ import {
   Download,
   FileSpreadsheet,
   Check,
+  Upload,
 } from 'lucide-react';
 import { ShopeeOrder, UserRole } from '../types';
 import { isValidSmsPhone } from '../utils/csvHelper';
@@ -313,6 +314,150 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
   >('orderCount');
   const [dirSortDirection, setDirSortDirection] = useState<'asc' | 'desc'>('desc');
 
+  // Batch sync state for Movider WhatsApp Blasting
+  const [lastDownloadedBatch, setLastDownloadedBatch] = useState<{
+    count: number;
+    fileName: string;
+    recipients: Array<{ phone: string; name: string; username?: string }>;
+  } | null>(null);
+  const [isSyncingBatch, setIsSyncingBatch] = useState<boolean>(false);
+  const [confirmBlastModal, setConfirmBlastModal] = useState<{
+    isOpen: boolean;
+    count: number;
+    recipients: Array<{ phone: string; name: string; username?: string }>;
+    sourceDescription: string;
+  } | null>(null);
+  const blastedFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Record an entire batch of recipients as contacted via Movider WhatsApp blast
+  const handleMarkBatchAsBlasted = async (
+    recipientsToMark: Array<{ phone: string; name: string; username?: string }>,
+    sourceDescription = 'Movider WhatsApp Blast'
+  ) => {
+    if (!recipientsToMark || recipientsToMark.length === 0) return;
+    setIsSyncingBatch(true);
+    try {
+      const timestamp = new Date().toISOString();
+      const newLogs: SmsLog[] = recipientsToMark.map((r, i) => {
+        let clean = (r.phone || '').replace(/\D/g, '');
+        if (clean.startsWith('0')) clean = '60' + clean.substring(1);
+        return {
+          id: `mwa_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}_${clean}`,
+          recipientName: r.name || r.username || 'Customer',
+          recipientPhone: clean,
+          messageText: `Movider WhatsApp Blast (${sourceDescription})`,
+          senderId: 'MOVIDER_WHATSAPP',
+          sentTime: timestamp,
+          status: 'DELIVERED',
+          channel: 'WHATSAPP',
+        };
+      });
+
+      // 1. Update localStorage
+      let localWaLogs: SmsLog[] = [];
+      try {
+        localWaLogs = JSON.parse(localStorage.getItem('wm_whatsapp_logs') || '[]');
+      } catch (e) {}
+      const combinedWa = [...newLogs, ...localWaLogs];
+      localStorage.setItem('wm_whatsapp_logs', JSON.stringify(combinedWa));
+
+      // 2. Update React state immediately (re-computes outreachCountMap, dirSentStats & table rows)
+      setSmsLogs((prev) => [...newLogs, ...prev]);
+
+      // 3. Sync to backend KV / memory so all colleagues see it in real-time
+      try {
+        await fetch('/api/send-sms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'sync_logs',
+            logs: newLogs,
+          }),
+        });
+      } catch (apiErr) {
+        console.warn('API sync warning:', apiErr);
+      }
+
+      setToastMessage(`✅ Successfully recorded ${recipientsToMark.length} recipients as Blasted! Updated to 1+ Sent.`);
+      setLastDownloadedBatch(null);
+      setConfirmBlastModal(null);
+      setTimeout(() => setToastMessage(null), 4500);
+    } catch (err: any) {
+      console.error('Failed to sync blast logs:', err);
+      alert('Failed to sync blast logs: ' + err.message);
+    } finally {
+      setIsSyncingBatch(false);
+    }
+  };
+
+  // Upload an Excel file (.xlsx, .xls, .csv) to auto-mark all contained phone numbers as blasted
+  const handleImportBlastedFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const jsonRows: any[] = XLSX.utils.sheet_to_json(worksheet);
+
+      if (jsonRows.length === 0) {
+        alert('The selected file contains no data rows.');
+        return;
+      }
+
+      const extractedRecipients: Array<{ phone: string; name: string; username?: string }> = [];
+      const seenPhones = new Set<string>();
+
+      jsonRows.forEach((row) => {
+        // Detect phone column
+        const rawPhone =
+          row['Phone Number'] ||
+          row['Phone'] ||
+          row['phone'] ||
+          row['Recipient Number'] ||
+          row['Mobile'] ||
+          row['Formatted Phone'] ||
+          Object.values(row).find((v) => typeof v === 'string' && /^\+?[\d\s-]{8,}$/.test(v));
+        if (!rawPhone) return;
+
+        let clean = String(rawPhone).replace(/\D/g, '');
+        if (clean.startsWith('0')) clean = '60' + clean.substring(1);
+        if (clean.length < 8) return;
+
+        if (!seenPhones.has(clean)) {
+          seenPhones.add(clean);
+          const name =
+            row['Customer Name'] ||
+            row['Name'] ||
+            row['Buyer Customer'] ||
+            row['Buyer Name'] ||
+            row['username'] ||
+            'Customer';
+          const username = row['Shopee Username'] || row['Username'] || '';
+          extractedRecipients.push({ phone: clean, name: String(name), username: String(username) });
+        }
+      });
+
+      if (extractedRecipients.length === 0) {
+        alert('No valid phone numbers could be found in the uploaded file.');
+        return;
+      }
+
+      setConfirmBlastModal({
+        isOpen: true,
+        count: extractedRecipients.length,
+        recipients: extractedRecipients,
+        sourceDescription: file.name,
+      });
+    } catch (err: any) {
+      alert('Failed to read Excel file: ' + err.message);
+    } finally {
+      if (e.target) e.target.value = '';
+    }
+  };
+
   // Handle adding custom mobile numbers
   const handleAddTestRecipient = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -557,6 +702,17 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
     const fileName = `Recipients_Directory_${filterTag}_${dateStr}.xlsx`;
 
     XLSX.writeFile(workbook, fileName);
+
+    // Save batch for 1-click sync after Movider WhatsApp blast
+    setLastDownloadedBatch({
+      count: exportData.length,
+      fileName,
+      recipients: filteredCustomerPickerList.map((c) => ({
+        phone: c.phone,
+        name: c.name,
+        username: c.username,
+      })),
+    });
 
     setDirExcelDownloadSuccess(true);
     setToastMessage(`📥 Downloaded ${exportData.length} recipients to ${fileName}`);
@@ -1608,6 +1764,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                       Clear
                     </button>
 
+                    {/* Download Excel */}
                     <button
                       type="button"
                       onClick={handleDownloadDirectoryExcel}
@@ -1633,9 +1790,110 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                         </>
                       )}
                     </button>
+
+                    {/* Hidden file input for uploading blasted file */}
+                    <input
+                      type="file"
+                      ref={blastedFileInputRef}
+                      className="hidden"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={handleImportBlastedFile}
+                    />
+
+                    {/* Import / Sync Blasted Excel */}
+                    <button
+                      type="button"
+                      onClick={() => blastedFileInputRef.current?.click()}
+                      title="Upload your blasted Excel file or Movider report to sync all numbers as contacted (1+ Sent)"
+                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-white hover:bg-blue-50 text-blue-700 border border-blue-300 shadow-2xs cursor-pointer transition-all active:scale-95 flex items-center gap-1"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Sync Blasted File</span>
+                    </button>
+
+                    {/* Quick Mark Blasted for Current Filtered List */}
+                    {filteredCustomerPickerList.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const targets =
+                            selectedCustomerUsernames.size > 0
+                              ? filteredCustomerPickerList.filter((c) => selectedCustomerUsernames.has(c.username))
+                              : filteredCustomerPickerList;
+                          setConfirmBlastModal({
+                            isOpen: true,
+                            count: targets.length,
+                            recipients: targets.map((c) => ({
+                              phone: c.phone,
+                              name: c.name,
+                              username: c.username,
+                            })),
+                            sourceDescription:
+                              selectedCustomerUsernames.size > 0
+                                ? `${targets.length} Selected Recipients`
+                                : `Current Filtered List (${targets.length})`,
+                          });
+                        }}
+                        title="Mark these recipients as blasted in Movider WhatsApp so they move to 1+ Sent"
+                        className="px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs cursor-pointer transition-all active:scale-95 flex items-center gap-1"
+                      >
+                        <Zap className="w-3.5 h-3.5 text-amber-500" />
+                        <span>
+                          Mark Blasted ({selectedCustomerUsernames.size > 0 ? selectedCustomerUsernames.size : filteredCustomerPickerList.length})
+                        </span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
+
+              {/* Post-Download 1-Click Sync Banner for Movider WhatsApp */}
+              {lastDownloadedBatch && (
+                <div className="p-3.5 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-2 border-emerald-300 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-xs animate-fade-in">
+                  <div className="flex items-start sm:items-center gap-2.5">
+                    <div className="p-2 bg-emerald-600 text-white rounded-lg shrink-0 shadow-xs">
+                      <Zap className="w-4 h-4 text-amber-300" />
+                    </div>
+                    <div>
+                      <div className="font-extrabold text-emerald-950 flex items-center gap-1.5 flex-wrap">
+                        <span>Exported {lastDownloadedBatch.count} recipients to</span>
+                        <code className="text-[11px] bg-white text-emerald-800 px-1.5 py-0.5 rounded border border-emerald-200 font-mono">
+                          {lastDownloadedBatch.fileName}
+                        </code>
+                      </div>
+                      <p className="text-emerald-800 text-[11px] mt-0.5">
+                        Once blasted in Movider WhatsApp, click <strong>Sync Blasted Numbers</strong> to immediately update all <strong>{lastDownloadedBatch.count} recipients to 1 Sent</strong> so they are never sent again!
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfirmBlastModal({
+                          isOpen: true,
+                          count: lastDownloadedBatch.count,
+                          recipients: lastDownloadedBatch.recipients,
+                          sourceDescription: lastDownloadedBatch.fileName,
+                        });
+                      }}
+                      disabled={isSyncingBatch}
+                      className="flex-1 sm:flex-none px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-lg shadow-xs cursor-pointer transition-all active:scale-95 flex items-center justify-center gap-1.5 text-xs"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+                      <span>Sync Blasted Numbers ({lastDownloadedBatch.count})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLastDownloadedBatch(null)}
+                      className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-emerald-100/50 rounded-lg cursor-pointer"
+                      title="Dismiss notice"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Inline Form to Add Mobile Number */}
               {isAddingTestNumber && (
@@ -2798,6 +3056,73 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
               >
                 <CheckCircle2 className="w-4 h-4" />
                 <span>Yes, Message Sent</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal to Record Movider WhatsApp Blast Batch */}
+      {confirmBlastModal && confirmBlastModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl border border-slate-200 animate-scale-up space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-emerald-100 text-emerald-800 rounded-xl">
+                  <Zap className="w-5 h-5 text-emerald-600" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-base">Record Movider WhatsApp Blast</h3>
+                  <p className="text-[11px] text-slate-500">Update Outreach History in Database</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfirmBlastModal(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 text-xs text-slate-600 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+              <p className="font-semibold text-slate-800">
+                You are about to record <span className="text-emerald-700 font-extrabold text-sm">{confirmBlastModal.count} recipients</span> from <code className="font-mono text-slate-700 bg-white px-1.5 py-0.5 rounded border border-slate-200">{confirmBlastModal.sourceDescription}</code> as contacted via Movider WhatsApp.
+              </p>
+              <ul className="space-y-1.5 text-[11px] text-slate-600 list-disc list-inside">
+                <li>Their outreach status will immediately change from <strong>0 Sent (Never Sent)</strong> to <strong>1 Sent</strong>.</li>
+                <li>They will immediately disappear from the <strong>0 Sent</strong> filter.</li>
+                <li>Future exports and blasts will automatically skip them, guaranteeing <strong>no duplicate outreach</strong>.</li>
+                <li>Changes sync to the backend database across all team members in real-time.</li>
+              </ul>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setConfirmBlastModal(null)}
+                disabled={isSyncingBatch}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleMarkBatchAsBlasted(confirmBlastModal.recipients, confirmBlastModal.sourceDescription)}
+                disabled={isSyncingBatch}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold shadow-xs cursor-pointer transition-all active:scale-95 flex items-center gap-1.5"
+              >
+                {isSyncingBatch ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Syncing...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Confirm &amp; Sync ({confirmBlastModal.count})</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
