@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import {
   MessageSquare,
   Send,
@@ -36,6 +37,9 @@ import {
   User,
   ArrowLeft,
   Info,
+  Download,
+  FileSpreadsheet,
+  Check,
 } from 'lucide-react';
 import { ShopeeOrder, UserRole } from '../types';
 import { isValidSmsPhone } from '../utils/csvHelper';
@@ -501,6 +505,10 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
 
   const targetCount = targetRecipients.length;
 
+  // Outreach Sent Filter for 1-Click WhatsApp Customer Outreach Queue: 'all' | '0' | '1_plus'
+  const [waSentFilter, setWaSentFilter] = useState<'all' | '0' | '1_plus'>('all');
+  const [excelDownloadSuccess, setExcelDownloadSuccess] = useState<boolean>(false);
+
   // Sorting state for 1-Click WhatsApp Customer Outreach Queue
   const [waSortField, setWaSortField] = useState<'name' | 'phone' | 'lastOrder' | 'country' | 'product' | 'messagesSent'>('lastOrder');
   const [waSortDirection, setWaSortDirection] = useState<'asc' | 'desc'>('desc');
@@ -514,9 +522,36 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
     }
   };
 
-  // Sort target recipients based on selected column
+  // Outreach message count statistics for the WhatsApp queue
+  const waSentStats = useMemo(() => {
+    let count0 = 0;
+    let count1Plus = 0;
+    targetRecipients.forEach((r) => {
+      const count = getCustomerOutreachCount(r.phone, r.name, r.username);
+      if (count === 0) count0++;
+      else count1Plus++;
+    });
+    return {
+      all: targetRecipients.length,
+      sent0: count0,
+      sent1Plus: count1Plus,
+    };
+  }, [targetRecipients, outreachCountMap]);
+
+  // Filter target recipients based on messages sent filter (All / 0 Sent / 1 & more Sent)
+  const filteredTargetRecipients = useMemo(() => {
+    if (waSentFilter === 'all') return targetRecipients;
+    return targetRecipients.filter((r) => {
+      const count = getCustomerOutreachCount(r.phone, r.name, r.username);
+      if (waSentFilter === '0') return count === 0;
+      if (waSentFilter === '1_plus') return count >= 1;
+      return true;
+    });
+  }, [targetRecipients, waSentFilter, outreachCountMap]);
+
+  // Sort filtered target recipients based on selected column
   const sortedTargetRecipients = useMemo(() => {
-    return [...targetRecipients].sort((a, b) => {
+    return [...filteredTargetRecipients].sort((a, b) => {
       let cmp = 0;
       if (waSortField === 'name') {
         cmp = (a.name || a.username || '').localeCompare(b.name || b.username || '');
@@ -535,7 +570,74 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
       }
       return waSortDirection === 'asc' ? cmp : -cmp;
     });
-  }, [targetRecipients, waSortField, waSortDirection, outreachCountMap]);
+  }, [filteredTargetRecipients, waSortField, waSortDirection, outreachCountMap]);
+
+  // Download current table phone numbers & customer data into Excel (.xlsx)
+  const handleDownloadExcel = () => {
+    if (sortedTargetRecipients.length === 0) return;
+
+    const exportData = sortedTargetRecipients.map((r) => {
+      let rawDigits = (r.phone || '').replace(/[^\d]/g, '');
+      if (rawDigits.startsWith('0')) {
+        rawDigits = '60' + rawDigits.substring(1);
+      }
+      const cleanPhone = rawDigits || (r.phone || '').trim();
+      const formattedPhone = cleanPhone.startsWith('60') ? `+${cleanPhone}` : cleanPhone;
+      const sentCount = getCustomerOutreachCount(r.phone, r.name, r.username);
+
+      return {
+        'Phone Number': cleanPhone,
+        'Formatted Phone': formattedPhone,
+        'Customer Name': r.name || r.username || 'Customer',
+        'Shopee Username': r.username ? `@${r.username}` : '',
+        'Messages Sent': sentCount,
+        'Last Order Date': r.lastOrderDate && r.lastOrderDate !== 'Custom Contact' ? r.lastOrderDate : (r.lastOrderDate || ''),
+        'Country': r.country || 'Malaysia',
+        'Product Name': r.product || 'Digital Product',
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+
+    // Set explicit string type for phone number columns so Excel does not format as scientific notation
+    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:H1');
+    for (let R = range.s.r + 1; R <= range.e.r; ++R) {
+      // Column 0 = Phone Number, Column 1 = Formatted Phone
+      const cellA = ws[XLSX.utils.encode_cell({ r: R, c: 0 })];
+      if (cellA) {
+        cellA.t = 's';
+        cellA.z = '@';
+      }
+      const cellB = ws[XLSX.utils.encode_cell({ r: R, c: 1 })];
+      if (cellB) {
+        cellB.t = 's';
+        cellB.z = '@';
+      }
+    }
+
+    // Set clean column widths
+    ws['!cols'] = [
+      { wch: 18 }, // Phone Number
+      { wch: 18 }, // Formatted Phone
+      { wch: 25 }, // Customer Name
+      { wch: 20 }, // Shopee Username
+      { wch: 15 }, // Messages Sent
+      { wch: 22 }, // Last Order Date
+      { wch: 15 }, // Country
+      { wch: 35 }, // Product Name
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'WhatsApp Contacts');
+
+    const filterSuffix = waSentFilter === '0' ? '_unsent_0' : waSentFilter === '1_plus' ? '_sent_1plus' : '_all';
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const fileName = `whatsapp_queue_phone_numbers${filterSuffix}_${todayStr}.xlsx`;
+
+    XLSX.writeFile(wb, fileName);
+    setExcelDownloadSuccess(true);
+    setTimeout(() => setExcelDownloadSuccess(false), 3000);
+  };
 
   // WhatsApp Queue Pagination Calculations
   const totalWaRecords = sortedTargetRecipients.length;
@@ -546,10 +648,10 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
     return sortedTargetRecipients.slice(waStartIndex, waEndIndex);
   }, [sortedTargetRecipients, waStartIndex, waEndIndex]);
 
-  // Reset WhatsApp Queue Page whenever audience filters or total recipients count change
+  // Reset WhatsApp Queue Page whenever audience filters, sent count filter, or total recipients count change
   useEffect(() => {
     setWaQueuePage(1);
-  }, [targetRecipients.length, audienceMode, selectedCustomerUsernames.size]);
+  }, [targetRecipients.length, audienceMode, selectedCustomerUsernames.size, waSentFilter]);
 
   // Detect Unicode / non-GSM characters
   const hasUnicode = useMemo(() => {
@@ -1672,17 +1774,134 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
       </div>
 
       {/* Section 2: Interactive 1-Click WhatsApp Direct Chat Queue */}
-      <div className="bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-          <div className="flex items-center gap-2">
+      <div className="bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-3.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div className="flex flex-wrap items-center gap-2">
             <MessageCircle className="w-4 h-4 text-emerald-600" />
             <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
               1-Click WhatsApp Customer Outreach Queue
             </h3>
+            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200">
+              {sortedTargetRecipients.length === targetRecipients.length
+                ? `${targetRecipients.length} Reachable Buyers`
+                : `${sortedTargetRecipients.length} of ${targetRecipients.length} Reachable Buyers`}
+            </span>
           </div>
-          <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200">
-            {targetRecipients.length} Reachable Buyers
-          </span>
+
+          {/* Action: Download Excel Phone Numbers */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleDownloadExcel}
+              disabled={sortedTargetRecipients.length === 0}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-2xs active:scale-95 cursor-pointer ${
+                excelDownloadSuccess
+                  ? 'bg-emerald-600 text-white border border-emerald-600'
+                  : sortedTargetRecipients.length === 0
+                  ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300'
+              }`}
+              title="Download phone numbers and customer details from current table to Excel (.xlsx)"
+            >
+              {excelDownloadSuccess ? (
+                <>
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Downloaded Excel!</span>
+                </>
+              ) : (
+                <>
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Download Phone Numbers (Excel)</span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-200/70 text-emerald-900 font-extrabold">
+                    {sortedTargetRecipients.length}
+                  </span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Filter Controls: Show only messages sent 0 or 1 & more */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-0.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+              <Filter className="w-3 h-3 text-slate-400" />
+              <span>Show Messages Sent:</span>
+            </span>
+            <div className="inline-flex p-1 bg-slate-100/90 rounded-xl border border-slate-200 gap-1 text-xs select-none">
+              <button
+                type="button"
+                onClick={() => setWaSentFilter('all')}
+                className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 cursor-pointer text-xs ${
+                  waSentFilter === 'all'
+                    ? 'bg-white text-emerald-700 shadow-2xs border border-emerald-200'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                }`}
+                title="Show all reachable buyers regardless of outreach message count"
+              >
+                <span>All</span>
+                <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                  waSentFilter === 'all' ? 'bg-emerald-100 text-emerald-800 font-extrabold' : 'bg-slate-200 text-slate-600'
+                }`}>
+                  {waSentStats.all}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setWaSentFilter('0')}
+                className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 cursor-pointer text-xs ${
+                  waSentFilter === '0'
+                    ? 'bg-white text-blue-700 shadow-2xs border border-blue-200'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                }`}
+                title="Show only buyers with 0 messages sent (Never contacted)"
+              >
+                <span>0 Sent (Uncontacted)</span>
+                <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                  waSentFilter === '0' ? 'bg-blue-100 text-blue-800 font-extrabold' : 'bg-slate-200 text-slate-600'
+                }`}>
+                  {waSentStats.sent0}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setWaSentFilter('1_plus')}
+                className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 cursor-pointer text-xs ${
+                  waSentFilter === '1_plus'
+                    ? 'bg-white text-purple-700 shadow-2xs border border-purple-200'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                }`}
+                title="Show only buyers with 1 or more messages sent (Previously contacted / follow-ups)"
+              >
+                <span>1 &amp; more Sent</span>
+                <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                  waSentFilter === '1_plus' ? 'bg-purple-100 text-purple-800 font-extrabold' : 'bg-slate-200 text-slate-600'
+                }`}>
+                  {waSentStats.sent1Plus}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div className="text-[11px] text-slate-500 font-medium">
+            {waSentFilter === '0' && (
+              <span className="inline-flex items-center gap-1 text-blue-700 font-semibold bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                Filtered: Showing {sortedTargetRecipients.length} customers with 0 messages sent
+              </span>
+            )}
+            {waSentFilter === '1_plus' && (
+              <span className="inline-flex items-center gap-1 text-purple-700 font-semibold bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
+                Filtered: Showing {sortedTargetRecipients.length} customers with 1 &amp; more messages sent
+              </span>
+            )}
+            {waSentFilter === 'all' && (
+              <span className="text-slate-400">
+                Showing all {sortedTargetRecipients.length} reachable buyers in outreach queue
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -1914,10 +2133,31 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                 );
               })}
 
-              {targetRecipients.length === 0 && (
+              {sortedTargetRecipients.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-xs text-slate-400 italic">
-                    No buyers matched the selected audience criteria.
+                  <td colSpan={7} className="py-10 text-center text-xs text-slate-500">
+                    <div className="max-w-md mx-auto space-y-1.5">
+                      <p className="font-bold text-slate-800 text-sm">
+                        {waSentFilter === '0'
+                          ? 'No uncontacted buyers (0 messages sent) found in this view.'
+                          : waSentFilter === '1_plus'
+                          ? 'No buyers with 1 or more messages sent found in this view.'
+                          : 'No buyers matched the selected audience criteria.'}
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        {waSentFilter !== 'all' ? (
+                          <button
+                            type="button"
+                            onClick={() => setWaSentFilter('all')}
+                            className="text-emerald-700 hover:text-emerald-800 font-bold underline cursor-pointer"
+                          >
+                            Show all {targetRecipients.length} reachable buyers in queue
+                          </button>
+                        ) : (
+                          'Try clearing your customer selection or adding custom test mobile numbers.'
+                        )}
+                      </p>
+                    </div>
                   </td>
                 </tr>
               )}
