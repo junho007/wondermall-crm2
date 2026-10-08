@@ -305,7 +305,12 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
   // Directory Table Filters & Sorting state
   const [dirCountryFilter, setDirCountryFilter] = useState<string>('All');
   const [dirProductFilter, setDirProductFilter] = useState<string>('All');
-  const [dirSortField, setDirSortField] = useState<'name' | 'orderCount' | 'phone' | 'country' | 'product'>('orderCount');
+  // Outreach Sent Filter for Select Recipients Directory: 'all' | '0' | '1_plus'
+  const [dirSentFilter, setDirSentFilter] = useState<'all' | '0' | '1_plus'>('all');
+  const [dirExcelDownloadSuccess, setDirExcelDownloadSuccess] = useState<boolean>(false);
+  const [dirSortField, setDirSortField] = useState<
+    'name' | 'orderCount' | 'phone' | 'country' | 'product' | 'messagesSent'
+  >('orderCount');
   const [dirSortDirection, setDirSortDirection] = useState<'asc' | 'desc'>('desc');
 
   // Handle adding custom mobile numbers
@@ -378,6 +383,32 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
     ];
   }, [customTestRecipients, reachableCustomers]);
 
+  // Compute counts for directory sent filter (0 sent vs 1 & more sent) based on selected country & product
+  const dirSentStats = useMemo(() => {
+    let base = allSelectableRecipients;
+    if (dirCountryFilter !== 'All') {
+      base = base.filter((c) => c.country === dirCountryFilter);
+    }
+    if (dirProductFilter !== 'All') {
+      base = base.filter((c) => c.product === dirProductFilter);
+    }
+    let sent0 = 0;
+    let sent1Plus = 0;
+    base.forEach((c) => {
+      const count = getCustomerOutreachCount(c.phone, c.name, c.username);
+      if (count === 0) {
+        sent0++;
+      } else {
+        sent1Plus++;
+      }
+    });
+    return {
+      all: base.length,
+      sent0,
+      sent1Plus,
+    };
+  }, [allSelectableRecipients, dirCountryFilter, dirProductFilter, outreachCountMap]);
+
   // Filtered and Sorted customer picker list for custom selection table
   const filteredCustomerPickerList = useMemo(() => {
     let list = allSelectableRecipients;
@@ -406,6 +437,19 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
       list = list.filter((c) => c.product === dirProductFilter);
     }
 
+    // Filter by Outreach Sent Status (All, 0 Sent, 1 & more Sent)
+    if (dirSentFilter === '0') {
+      list = list.filter((c) => {
+        const count = getCustomerOutreachCount(c.phone, c.name, c.username);
+        return count === 0;
+      });
+    } else if (dirSentFilter === '1_plus') {
+      list = list.filter((c) => {
+        const count = getCustomerOutreachCount(c.phone, c.name, c.username);
+        return count > 0;
+      });
+    }
+
     // Sort list
     return [...list].sort((a, b) => {
       let cmp = 0;
@@ -419,6 +463,10 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
         cmp = (a.country || '').localeCompare(b.country || '');
       } else if (dirSortField === 'product') {
         cmp = (a.product || '').localeCompare(b.product || '');
+      } else if (dirSortField === 'messagesSent') {
+        const countA = getCustomerOutreachCount(a.phone, a.name, a.username);
+        const countB = getCustomerOutreachCount(b.phone, b.name, b.username);
+        cmp = countA - countB;
       }
       return dirSortDirection === 'asc' ? cmp : -cmp;
     });
@@ -427,17 +475,95 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
     customerSearchQuery,
     dirCountryFilter,
     dirProductFilter,
+    dirSentFilter,
     dirSortField,
     dirSortDirection,
+    outreachCountMap,
   ]);
 
-  const handleSortToggle = (field: 'name' | 'orderCount' | 'phone' | 'country' | 'product') => {
+  const handleSortToggle = (field: 'name' | 'orderCount' | 'phone' | 'country' | 'product' | 'messagesSent') => {
     if (dirSortField === field) {
       setDirSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
     } else {
       setDirSortField(field);
-      setDirSortDirection(field === 'orderCount' ? 'desc' : 'asc');
+      setDirSortDirection(field === 'orderCount' || field === 'messagesSent' ? 'desc' : 'asc');
     }
+  };
+
+  // Download filtered customer directory recipient phone numbers to Excel (.xlsx)
+  const handleDownloadDirectoryExcel = () => {
+    if (filteredCustomerPickerList.length === 0) return;
+
+    const exportData = filteredCustomerPickerList.map((r, idx) => {
+      let cleanPhone = (r.phone || '').replace(/\D/g, '');
+      if (cleanPhone.startsWith('0')) {
+        cleanPhone = '60' + cleanPhone.substring(1);
+      }
+      const outreachCount = getCustomerOutreachCount(r.phone, r.name, r.username);
+
+      return {
+        'No.': idx + 1,
+        'Phone Number': cleanPhone,
+        'Formatted Phone': r.phone || '',
+        'Customer Name': r.name || 'Shopee Customer',
+        'Shopee Username': r.username || '',
+        'Outreach Messages Sent': outreachCount,
+        'Purchases': ('isTest' in r && (r as any).isTest) ? 0 : (r.orderCount || 1),
+        'Country': r.country || 'Malaysia',
+        'Product Name': r.product || 'Shopee Order',
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+
+    // Format phone number columns as string text ('@') to avoid Excel scientific notation
+    const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1:A1');
+    for (let R = range.s.r; R <= range.e.r; ++R) {
+      const phoneCellAddr = XLSX.utils.encode_cell({ r: R, c: 1 });
+      const formattedPhoneCellAddr = XLSX.utils.encode_cell({ r: R, c: 2 });
+      if (worksheet[phoneCellAddr]) {
+        worksheet[phoneCellAddr].t = 's';
+        worksheet[phoneCellAddr].z = '@';
+      }
+      if (worksheet[formattedPhoneCellAddr]) {
+        worksheet[formattedPhoneCellAddr].t = 's';
+        worksheet[formattedPhoneCellAddr].z = '@';
+      }
+    }
+
+    worksheet['!cols'] = [
+      { wch: 6 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 25 },
+      { wch: 20 },
+      { wch: 24 },
+      { wch: 12 },
+      { wch: 16 },
+      { wch: 35 },
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    const sheetName =
+      dirSentFilter === '0'
+        ? 'Uncontacted (0 Sent)'
+        : dirSentFilter === '1_plus'
+        ? 'Contacted (1+ Sent)'
+        : 'Recipients Directory';
+    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+
+    const filterTag = dirSentFilter === '0' ? '0_sent_new' : dirSentFilter === '1_plus' ? '1_plus_sent' : 'all';
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const fileName = `Recipients_Directory_${filterTag}_${dateStr}.xlsx`;
+
+    XLSX.writeFile(workbook, fileName);
+
+    setDirExcelDownloadSuccess(true);
+    setToastMessage(`📥 Downloaded ${exportData.length} recipients to ${fileName}`);
+    setTimeout(() => {
+      setDirExcelDownloadSuccess(false);
+      setToastMessage(null);
+    }, 4000);
   };
 
   const handleToggleCustomer = (username: string) => {
@@ -1364,30 +1490,31 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                 </div>
               </div>
 
-              {/* Filter By Segment (Country & Product) Toolbar */}
+              {/* Filter By Segment (Country, Product & Outreach Sent) Toolbar */}
               <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-800 uppercase tracking-wider">
                     <Filter className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Filter By Segment (Country &amp; Product)</span>
+                    <span>Filter By Segment &amp; Outreach History</span>
                   </div>
-                  {(dirCountryFilter !== 'All' || dirProductFilter !== 'All' || customerSearchQuery.trim()) && (
+                  {(dirCountryFilter !== 'All' || dirProductFilter !== 'All' || dirSentFilter !== 'all' || customerSearchQuery.trim()) && (
                     <button
                       type="button"
                       onClick={() => {
                         setDirCountryFilter('All');
                         setDirProductFilter('All');
+                        setDirSentFilter('all');
                         setCustomerSearchQuery('');
                       }}
                       className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer flex items-center gap-1"
                     >
                       <RotateCcw className="w-3 h-3" />
-                      <span>Reset Both Filters</span>
+                      <span>Reset Filters</span>
                     </button>
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {/* Dropdown 1: Country */}
                   <div className="space-y-1">
                     <label className="block text-[10px] font-bold uppercase text-slate-500">
@@ -1419,6 +1546,23 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                       className="w-full"
                     />
                   </div>
+
+                  {/* Dropdown 3: Outreach Sent Status */}
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold uppercase text-slate-500">
+                      3. Outreach Sent Status
+                    </label>
+                    <CustomDropdown
+                      options={[
+                        { value: 'all', label: `All Status (${dirSentStats.all})` },
+                        { value: '0', label: `0 Sent / Never Sent (${dirSentStats.sent0})` },
+                        { value: '1_plus', label: `1 & more Sent (${dirSentStats.sent1Plus})` },
+                      ]}
+                      value={dirSentFilter}
+                      onChange={(val) => setDirSentFilter(val as 'all' | '0' | '1_plus')}
+                      className="w-full"
+                    />
+                  </div>
                 </div>
 
                 {/* Search & Actions Toolbar */}
@@ -1434,7 +1578,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                     />
                   </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <button
                       type="button"
                       onClick={() => setIsAddingTestNumber(!isAddingTestNumber)}
@@ -1462,6 +1606,32 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                       className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold cursor-pointer transition-all active:scale-95"
                     >
                       Clear
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleDownloadDirectoryExcel}
+                      disabled={filteredCustomerPickerList.length === 0}
+                      title="Download filtered recipient phone numbers to Excel (.xlsx)"
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border cursor-pointer transition-all active:scale-95 flex items-center gap-1 ${
+                        dirExcelDownloadSuccess
+                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          : filteredCustomerPickerList.length === 0
+                          ? 'bg-slate-50 text-slate-300 border-slate-200 cursor-not-allowed'
+                          : 'bg-white hover:bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs'
+                      }`}
+                    >
+                      {dirExcelDownloadSuccess ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-white" />
+                          <span>Downloaded!</span>
+                        </>
+                      ) : (
+                        <>
+                          <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>Excel</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -1529,7 +1699,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
               )}
 
               {/* Recipients Directory Table */}
-              <div className="h-[460px] max-h-[500px] overflow-y-auto border border-slate-200 rounded-xl bg-white shadow-2xs">
+              <div className="h-[460px] max-h-[500px] overflow-y-auto overflow-x-auto border border-slate-200 rounded-xl bg-white shadow-2xs">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="sticky top-0 bg-slate-100/95 backdrop-blur-xs text-slate-600 font-bold uppercase text-[10px] border-b border-slate-200 z-10 select-none">
                     <tr>
@@ -1585,6 +1755,23 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                         </div>
                       </th>
                       <th
+                        onClick={() => handleSortToggle('messagesSent')}
+                        className="py-2.5 px-3 cursor-pointer hover:bg-slate-200/70 transition-colors"
+                      >
+                        <div className="flex items-center gap-1">
+                          <span>Outreach Sent</span>
+                          {dirSortField === 'messagesSent' ? (
+                            dirSortDirection === 'asc' ? (
+                              <ArrowUp className="w-3 h-3 text-blue-600" />
+                            ) : (
+                              <ArrowDown className="w-3 h-3 text-blue-600" />
+                            )
+                          ) : (
+                            <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                          )}
+                        </div>
+                      </th>
+                      <th
                         onClick={() => handleSortToggle('country')}
                         className="py-2.5 px-3 cursor-pointer hover:bg-slate-200/70 transition-colors"
                       >
@@ -1606,14 +1793,38 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                   <tbody className="divide-y divide-slate-100 font-medium">
                     {filteredCustomerPickerList.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="py-16 text-center text-xs text-slate-400 italic">
-                          No matching recipients found. Try clearing your filters or search term.
+                        <td colSpan={5} className="py-16 text-center text-xs text-slate-500">
+                          <div className="max-w-xs mx-auto space-y-1.5">
+                            <p className="font-bold text-slate-700">No matching recipients found</p>
+                            <p className="text-[11px] text-slate-400">
+                              {dirSentFilter === '0'
+                                ? 'No customers with 0 outreach messages sent match the active search or filters.'
+                                : dirSentFilter === '1_plus'
+                                ? 'No customers with 1 & more messages sent match the active search or filters.'
+                                : 'Try clearing your filters or search term.'}
+                            </p>
+                            {(dirCountryFilter !== 'All' || dirProductFilter !== 'All' || dirSentFilter !== 'all' || customerSearchQuery.trim()) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDirCountryFilter('All');
+                                  setDirProductFilter('All');
+                                  setDirSentFilter('all');
+                                  setCustomerSearchQuery('');
+                                }}
+                                className="mt-2 text-xs font-bold text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                              >
+                                Reset All Filters
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ) : (
                       filteredCustomerPickerList.map((cust) => {
                         const isChecked = selectedCustomerUsernames.has(cust.username);
                         const isTest = 'isTest' in cust && (cust as any).isTest;
+                        const outreachCount = getCustomerOutreachCount(cust.phone, cust.name, cust.username);
 
                         return (
                           <tr
@@ -1663,6 +1874,20 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                               <span className="font-bold text-xs text-slate-800">
                                 {isTest ? '—' : cust.orderCount || 1}
                               </span>
+                            </td>
+
+                            {/* Outreach Messages Sent Column */}
+                            <td className="py-2.5 px-3">
+                              {outreachCount === 0 ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                                  0 Sent
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200">
+                                  <CheckCircle2 className="w-2.5 h-2.5 text-blue-600" />
+                                  <span>{outreachCount} Sent</span>
+                                </span>
+                              )}
                             </td>
 
                             {/* Country: Just country */}
