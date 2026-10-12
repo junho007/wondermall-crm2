@@ -545,6 +545,23 @@ export default function App() {
                 ? mappedItems.reduce((acc, it) => acc + (it.quantity || 1), 0)
                 : (Number(o.item_count) || 1));
 
+            // Calculate true sum of items (per-item price * item quantity)
+            const calculatedItemsGmv = mappedItems.reduce((acc, it) => {
+              const unitP = it.paidAmount || it.retailPrice || 0;
+              const q = it.quantity || 1;
+              return acc + (unitP * q);
+            }, 0);
+
+            let finalTotalAmt = totalAmt;
+            if (calculatedItemsGmv > 0 && (finalTotalAmt === 0 || (finalTotalAmt < calculatedItemsGmv && totalQuantity > 1))) {
+              finalTotalAmt = calculatedItemsGmv;
+            }
+
+            let finalMerchandiseSubtotal = merchandiseSubtotal;
+            if (calculatedItemsGmv > 0 && (finalMerchandiseSubtotal <= 0 || (finalMerchandiseSubtotal < calculatedItemsGmv && totalQuantity > 1))) {
+              finalMerchandiseSubtotal = calculatedItemsGmv;
+            }
+
             // Generate clean product name with variations if multiple items exist
             let orderProductName = o.items?.[0]?.item_name || 'Shopee Store Order Item';
             if (mappedItems.length > 1) {
@@ -561,9 +578,9 @@ export default function App() {
               buyerUsername: o.buyer_username || 'Shopee Customer',
               productName: orderProductName,
               items: mappedItems.length > 0 ? mappedItems : undefined,
-              totalAmount: totalAmt,
-              rawTotalAmount: `${o.currency || 'RM'} ${o.total_amount}`,
-              costOfGoodsSold: merchandiseSubtotal > 0 ? merchandiseSubtotal : totalAmt,
+              totalAmount: finalTotalAmt,
+              rawTotalAmount: `${o.currency || 'RM'} ${finalTotalAmt.toFixed(2)}`,
+              costOfGoodsSold: finalMerchandiseSubtotal > 0 ? finalMerchandiseSubtotal : finalTotalAmt,
               sellerVoucherDiscount: sellerVoucher,
               voucherCode: o.voucher_code || '',
               commissionFee: commFee,

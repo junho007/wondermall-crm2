@@ -115,18 +115,18 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
   });
   const senderId = 'WCGMall';
 
-  // Marketing Channel Selection - default to 'sms' so SMS blast sends real SMS
-  const [dispatchChannel, setDispatchChannel] = useState<'sms' | 'whatsapp' | 'both'>('sms');
+  // Pure SMS Marketing Dashboard - sends SMS via Movider Gateway
+  const dispatchChannel = 'sms';
 
   // Audience & Composition State (All Reachable vs Select Customers Directory)
   const [audienceMode, setAudienceMode] = useState<'all' | 'custom'>('all');
   const [selectedCustomerUsernames, setSelectedCustomerUsernames] = useState<Set<string>>(new Set());
   const [customerSearchQuery, setCustomerSearchQuery] = useState<string>('');
 
-  // Page View State: 'composer' (Hub + Composer + WA Queue) vs 'history' (Dedicated Campaign Logs & Audit History)
+  // Page View State: 'composer' (Hub + Composer + SMS Queue) vs 'history' (Dedicated Campaign Logs & Audit History)
   const [activeView, setActiveView] = useState<'composer' | 'history'>('composer');
 
-  // 1-Click WhatsApp Queue Pagination & Customer Profile Modal State
+  // SMS Customer Queue Pagination & Customer Profile Modal State
   const [waQueuePage, setWaQueuePage] = useState<number>(1);
   const [waQueuePageSize, setWaQueuePageSize] = useState<number>(25);
   const [selectedProfileCustomer, setSelectedProfileCustomer] = useState<{
@@ -136,6 +136,9 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
     country?: string;
     product?: string;
   } | null>(null);
+
+  // Track single recipient sending progress
+  const [sendingRecipientPhone, setSendingRecipientPhone] = useState<string | null>(null);
 
   // Added Custom Mobile Numbers State
   const [customTestRecipients, setCustomTestRecipients] = useState<CustomTestRecipient[]>(() => {
@@ -183,14 +186,6 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
   const [channelFilter, setChannelFilter] = useState<'ALL' | 'SMS' | 'WHATSAPP'>('ALL');
   const [logsPage, setLogsPage] = useState<number>(1);
   const [logsPageSize, setLogsPageSize] = useState<number>(10);
-
-  // State for WhatsApp Outreach Confirmation Modal
-  const [pendingWaConfirmation, setPendingWaConfirmation] = useState<{
-    recipient: { name: string; phone: string; username?: string; country?: string; product?: string };
-    waPhone: string;
-    initialMessage: string;
-    customMessage: string;
-  } | null>(null);
 
   // Extract unique customers from orders with phone number detection, purchase count, and last order date tracking
   const customerList = useMemo(() => {
@@ -329,10 +324,10 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
   } | null>(null);
   const blastedFileInputRef = useRef<HTMLInputElement>(null);
 
-  // Record an entire batch of recipients as contacted via Movider WhatsApp blast
+  // Record an entire batch of recipients as contacted via Movider blast
   const handleMarkBatchAsBlasted = async (
     recipientsToMark: Array<{ phone: string; name: string; username?: string }>,
-    sourceDescription = 'Movider WhatsApp Blast'
+    sourceDescription = 'Movider Blast'
   ) => {
     if (!recipientsToMark || recipientsToMark.length === 0) return;
     setIsSyncingBatch(true);
@@ -342,24 +337,24 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
         let clean = (r.phone || '').replace(/\D/g, '');
         if (clean.startsWith('0')) clean = '60' + clean.substring(1);
         return {
-          id: `mwa_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}_${clean}`,
+          id: `msms_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}_${clean}`,
           recipientName: r.name || r.username || 'Customer',
           recipientPhone: clean,
-          messageText: `Movider WhatsApp Blast (${sourceDescription})`,
-          senderId: 'MOVIDER_WHATSAPP',
+          messageText: `Movider Campaign Blast (${sourceDescription})`,
+          senderId: 'MOVIDER',
           sentTime: timestamp,
           status: 'DELIVERED',
-          channel: 'WHATSAPP',
+          channel: 'SMS',
         };
       });
 
       // 1. Update localStorage
-      let localWaLogs: SmsLog[] = [];
+      let localSmsLogs: SmsLog[] = [];
       try {
-        localWaLogs = JSON.parse(localStorage.getItem('wm_whatsapp_logs') || '[]');
+        localSmsLogs = JSON.parse(localStorage.getItem('wm_movider_sms_logs') || '[]');
       } catch (e) {}
-      const combinedWa = [...newLogs, ...localWaLogs];
-      localStorage.setItem('wm_whatsapp_logs', JSON.stringify(combinedWa));
+      const combinedSms = [...newLogs, ...localSmsLogs];
+      localStorage.setItem('wm_movider_sms_logs', JSON.stringify(combinedSms));
 
       // 2. Update React state immediately (re-computes outreachCountMap, dirSentStats & table rows)
       setSmsLogs((prev) => [...newLogs, ...prev]);
@@ -910,11 +905,11 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
     ];
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'WhatsApp Contacts');
+    XLSX.utils.book_append_sheet(wb, ws, 'SMS Contacts');
 
     const filterSuffix = waSentFilter === '0' ? '_unsent_0' : waSentFilter === '1_plus' ? '_sent_1plus' : '_all';
     const todayStr = new Date().toISOString().slice(0, 10);
-    const fileName = `whatsapp_queue_phone_numbers${filterSuffix}_${todayStr}.xlsx`;
+    const fileName = `sms_queue_phone_numbers${filterSuffix}_${todayStr}.xlsx`;
 
     XLSX.writeFile(wb, fileName);
     setExcelDownloadSuccess(true);
@@ -1108,85 +1103,55 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
     setMessageText((prev) => `${prev} ${symbol}`);
   };
 
-  // Launch WhatsApp Web Direct Chat for a single recipient (shows confirmation modal)
-  const handleLaunchWhatsAppChat = (
-    recipient: { name: string; phone: string; username?: string; country?: string; product?: string },
-    customMsg?: string
+  // Dispatch single SMS to a specific customer using Movider SMS API
+  const handleSendSingleSms = async (
+    recipient: { name: string; phone: string; username?: string; country?: string; product?: string }
   ) => {
-    const waPhone = formatWhatsAppPhone(recipient.phone);
-    if (!waPhone) {
-      setToastMessage('❌ Invalid or missing phone number for WhatsApp.');
+    let cleanPhone = (recipient.phone || '').replace(/\D/g, '');
+    if (cleanPhone.startsWith('0')) cleanPhone = '60' + cleanPhone.substring(1);
+    if (!cleanPhone || cleanPhone.length < 7) {
+      setToastMessage('❌ Invalid or missing phone number for SMS.');
       setTimeout(() => setToastMessage(null), 3500);
       return;
     }
 
-    const finalMsg =
-      customMsg ||
-      messageText.replace(/\{buyerName\}/g, recipient.name || recipient.username || 'Customer');
-
-    const encodedText = encodeURIComponent(finalMsg);
-    const waUrl = `https://wa.me/${waPhone}?text=${encodedText}`;
-
-    // Open WhatsApp in new tab
-    window.open(waUrl, '_blank', 'noopener,noreferrer');
-
-    // Open the Confirmation Modal immediately without recording false history
-    setPendingWaConfirmation({
-      recipient,
-      waPhone,
-      initialMessage: finalMsg,
-      customMessage: finalMsg,
-    });
-  };
-
-  // Confirm that message was actually sent in WhatsApp (with any edited note/text)
-  const handleConfirmWaSent = async () => {
-    if (!pendingWaConfirmation) return;
-    const { recipient, waPhone, customMessage } = pendingWaConfirmation;
-    const cleanPhone = (recipient.phone || '').replace(/^\+/, '').replace(/\s+/g, '');
-
-    const newLog: SmsLog = {
-      id: `wa_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      recipientName: recipient.name || recipient.username || 'Customer',
-      recipientPhone: cleanPhone,
-      messageText: customMessage || pendingWaConfirmation.initialMessage,
-      senderId: 'WHATSAPP_WEB',
-      sentTime: new Date().toISOString(),
-      status: 'DELIVERED',
-      channel: 'WHATSAPP',
-    };
-
-    // Save to local WhatsApp logs
-    const existingWaLogs: SmsLog[] = JSON.parse(localStorage.getItem('wm_whatsapp_logs') || '[]');
-    const updatedWaLogs = [newLog, ...existingWaLogs.filter((x) => x.id !== newLog.id)];
-    localStorage.setItem('wm_whatsapp_logs', JSON.stringify(updatedWaLogs));
-
-    setSmsLogs((prev) => [newLog, ...prev]);
-
-    // Broadcast outreach immediately to backend API so all CS staff receive it in real-time
+    setSendingRecipientPhone(recipient.phone);
     try {
-      await fetch('/api/send-sms', {
+      const personalizedMsg = messageText.replace(/\{buyerName\}/g, recipient.name || recipient.username || 'Customer');
+      setToastMessage(`⏳ Sending SMS to ${recipient.name} (+${cleanPhone})...`);
+
+      const response = await fetch('/api/send-sms', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'log_outreach',
-          log: newLog,
+          action: 'send_sms',
+          apiKey: apiKey || VALID_DEFAULT_KEY,
+          apiSecret: apiSecret || VALID_DEFAULT_SECRET,
+          senderId: 'WCGMall',
+          recipientPhone: cleanPhone,
+          recipientName: recipient.name || recipient.username,
+          messageText: personalizedMsg,
+          channel: 'SMS',
         }),
       });
-    } catch (e) {
-      console.warn('Failed to broadcast WhatsApp outreach to server:', e);
+
+      const data = await response.json();
+      if (data.success) {
+        setToastMessage(`✅ SMS sent successfully to ${recipient.name}!`);
+        fetchSmsLogsAndSettings();
+      } else {
+        const errMsg = data.log?.errorMessage || data.message || 'Failed to dispatch SMS';
+        setToastMessage(`❌ SMS Failed: ${errMsg}`);
+      }
+    } catch (e: any) {
+      setToastMessage(`❌ SMS dispatch error: ${e.message}`);
+    } finally {
+      setSendingRecipientPhone(null);
+      setTimeout(() => setToastMessage(null), 4000);
     }
-
-    setToastMessage(`✅ WhatsApp message recorded for ${recipient.name} (+${waPhone})!`);
-    setTimeout(() => setToastMessage(null), 3500);
-    setPendingWaConfirmation(null);
   };
 
-  const handleCancelWaConfirmation = () => {
-    setPendingWaConfirmation(null);
-  };
-
-  // Main Campaign Dispatcher (SMS, WhatsApp, or Omnichannel)
+  // Main SMS Campaign Dispatcher
   const handleDispatchCampaign = async () => {
     if (!messageText.trim()) {
       alert('Please enter message text before dispatching.');
@@ -1205,56 +1170,46 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
       let lastSmsError: string | null = null;
       let successCount = 0;
 
-      if (dispatchChannel === 'sms' || dispatchChannel === 'both') {
-        setToastMessage(`⏳ Dispatching SMS to ${batchList.length} recipient(s)...`);
+      setToastMessage(`⏳ Dispatching SMS to ${batchList.length} recipient(s)...`);
 
-        for (let i = 0; i < batchList.length; i++) {
-          const recipient = batchList[i];
-          setToastMessage(`⏳ Sending SMS ${i + 1} of ${batchList.length} to ${recipient.name}...`);
+      for (let i = 0; i < batchList.length; i++) {
+        const recipient = batchList[i];
+        setToastMessage(`⏳ Sending SMS ${i + 1} of ${batchList.length} to ${recipient.name}...`);
 
-          const personalizedMsg = messageText.replace(/\{buyerName\}/g, recipient.name || recipient.username || 'Customer');
+        const personalizedMsg = messageText.replace(/\{buyerName\}/g, recipient.name || recipient.username || 'Customer');
 
-          const response = await fetch('/api/send-sms', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'send_sms',
-              apiKey: apiKey || 'iPnNDUbKo2OyVvr5osnidwt8uL1-GW',
-              apiSecret: apiSecret || 'Jl0WWdL6vGjbq5ZVT2qxLFJqUYadPE',
-              senderId: 'WCGMall',
-              recipientPhone: recipient.phone,
-              recipientName: recipient.name || recipient.username,
-              messageText: personalizedMsg,
-              channel: dispatchChannel === 'both' ? 'SMS' : dispatchChannel.toUpperCase(),
-            }),
-          });
+        const response = await fetch('/api/send-sms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'send_sms',
+            apiKey: apiKey || VALID_DEFAULT_KEY,
+            apiSecret: apiSecret || VALID_DEFAULT_SECRET,
+            senderId: 'WCGMall',
+            recipientPhone: recipient.phone,
+            recipientName: recipient.name || recipient.username,
+            messageText: personalizedMsg,
+            channel: 'SMS',
+          }),
+        });
 
-          const data = await response.json();
-          if (data.log?.errorMessage) {
-            lastSmsError = data.log.errorMessage;
-          } else if (data.success) {
-            successCount += 1;
-          }
-
-          // 200ms pacing between consecutive messages to prevent telco spam-rate throttling
-          if (i < batchList.length - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 200));
-          }
+        const data = await response.json();
+        if (data.log?.errorMessage) {
+          lastSmsError = data.log.errorMessage;
+        } else if (data.success) {
+          successCount += 1;
         }
-      }
 
-      if (dispatchChannel === 'whatsapp' || dispatchChannel === 'both') {
-        // Automatically open the WhatsApp chat for the first recipient in batch
-        const firstRecipient = batchList[0];
-        if (firstRecipient) {
-          handleLaunchWhatsAppChat(firstRecipient);
+        // 200ms pacing between consecutive messages to prevent telco spam-rate throttling
+        if (i < batchList.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
         }
       }
 
       if (lastSmsError && successCount === 0) {
         setToastMessage(`❌ SMS Failed: ${lastSmsError}`);
       } else {
-        setToastMessage(`✅ Successfully dispatched campaign to ${batchList.length} recipient(s)!`);
+        setToastMessage(`✅ Successfully dispatched SMS campaign to ${successCount} of ${batchList.length} recipient(s)!`);
       }
       fetchSmsLogsAndSettings();
     } catch (err) {
@@ -1312,27 +1267,27 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
       <div className="bg-white rounded-2xl p-5 shadow-xs border border-slate-200 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-green-500 text-white flex items-center justify-center font-bold shadow-md shrink-0">
-            {activeView === 'history' ? <Clock className="w-6 h-6" /> : <MessageCircle className="w-6 h-6" />}
+            {activeView === 'history' ? <Clock className="w-6 h-6" /> : <Smartphone className="w-6 h-6" />}
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-base font-extrabold text-slate-900 tracking-tight">
-                {activeView === 'history' ? 'Outbound Campaign Logs & Audit History' : 'SMS & WhatsApp Marketing Hub'}
+                {activeView === 'history' ? 'Outbound Campaign Logs & Audit History' : 'SMS Marketing Hub'}
               </h2>
-              <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold uppercase flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+              <span className="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300 text-[10px] font-bold uppercase flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                 Movider SMS Gateway Active
               </span>
             </div>
             <p className="text-xs text-slate-500 font-medium mt-0.5">
               {activeView === 'history'
-                ? 'Review audit logs, delivery statuses, error reports, and recipient responses across SMS & WhatsApp channels.'
-                : 'Engage Shopee buyers with automated order notifications, voucher delivery, and instant messaging.'}
+                ? 'Review audit logs, delivery statuses, error reports, and recipient responses across SMS & outreach channels.'
+                : 'Broadcast promotions, discount vouchers, and direct SMS alerts to your customer base via Movider SMS API.'}
             </p>
           </div>
         </div>
 
-        {/* Right side of SMS & WhatsApp Marketing Hub box: History / Back Button */}
+        {/* Right side of SMS Marketing Hub box: History / Back Button */}
         <div className="flex items-center gap-2">
           {activeView === 'composer' ? (
             <button
@@ -1343,7 +1298,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
             >
               <Clock className="w-4 h-4 text-emerald-400 group-hover:rotate-12 transition-transform" />
               <span>History</span>
-              <span className="px-2 py-0.5 rounded-full bg-slate-800 text-emerald-300 text-[10px] font-mono border border-slate-700 font-bold">
+              <span className="px-2.5 py-0.5 rounded-full bg-slate-800 text-emerald-300 text-[10px] font-mono border border-slate-700 font-bold">
                 {smsLogs.length}
               </span>
             </button>
@@ -1351,7 +1306,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
             <button
               type="button"
               onClick={() => setActiveView('composer')}
-              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold flex items-center gap-2 cursor-pointer shadow-sm transition-all active:scale-95"
+              className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-extrabold flex items-center gap-2 cursor-pointer shadow-sm transition-all active:scale-95"
               title="Return to Campaign Composer"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -1374,19 +1329,19 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
         </div>
       )}
 
-      {/* VIEW 1: CAMPAIGN COMPOSER & 1-CLICK WHATSAPP OUTREACH QUEUE */}
+      {/* VIEW 1: CAMPAIGN COMPOSER & SMS OUTREACH QUEUE */}
       {activeView === 'composer' && (
         <>
           {/* Main Grid: Responsive 12-Column Layout */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Left Column: Campaign Composer */}
             <div className={`${audienceMode === 'custom' ? 'lg:col-span-5' : 'lg:col-span-7 xl:col-span-8'} bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-4`}>
-          {/* Header & Channel Selector Bar */}
+          {/* Header & Gateway Status Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
             <div className="flex items-center gap-2.5 flex-wrap">
-              <Send className="w-4 h-4 text-emerald-600" />
+              <Send className="w-4 h-4 text-blue-600" />
               <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
-                Compose Marketing Campaign
+                Compose SMS Campaign
               </h3>
               <span className="px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200 text-[10px] font-extrabold flex items-center gap-1 shadow-2xs">
                 <Smartphone className="w-3 h-3 text-blue-600" />
@@ -1394,44 +1349,10 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
               </span>
             </div>
 
-            {/* Dispatch Channel Switcher */}
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs">
-              <button
-                type="button"
-                onClick={() => setDispatchChannel('whatsapp')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer flex items-center gap-1.5 ${
-                  dispatchChannel === 'whatsapp'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <MessageCircle className="w-3.5 h-3.5" />
-                <span>WhatsApp</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setDispatchChannel('sms')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer flex items-center gap-1.5 ${
-                  dispatchChannel === 'sms'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Smartphone className="w-3.5 h-3.5" />
-                <span>SMS</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setDispatchChannel('both')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer flex items-center gap-1.5 ${
-                  dispatchChannel === 'both'
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Zap className="w-3.5 h-3.5 text-amber-400" />
-                <span>SMS + WA</span>
-              </button>
+            {/* Gateway Status Badge */}
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 border border-blue-200 text-xs font-extrabold text-blue-800">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Movider SMS Gateway</span>
             </div>
           </div>
 
@@ -1597,28 +1518,14 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
               className={`w-full py-3.5 rounded-xl text-xs font-extrabold uppercase tracking-wider shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer ${
                 isSending
                   ? 'bg-slate-400 text-white cursor-not-allowed'
-                  : dispatchChannel === 'whatsapp'
-                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white active:scale-98'
-                  : dispatchChannel === 'sms'
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white active:scale-98'
-                  : 'bg-slate-900 hover:bg-slate-800 text-white active:scale-98'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white active:scale-98'
               }`}
             >
-              {dispatchChannel === 'whatsapp' ? (
-                <MessageCircle className="w-4 h-4 text-white" />
-              ) : dispatchChannel === 'sms' ? (
-                <Send className="w-4 h-4 text-white" />
-              ) : (
-                <Zap className="w-4 h-4 text-amber-400" />
-              )}
+              <Send className="w-4 h-4 text-white" />
               <span>
                 {isSending
-                  ? 'Dispatching Campaign...'
-                  : dispatchChannel === 'whatsapp'
-                  ? `Open WhatsApp Chat for ${targetCount} Recipient(s)`
-                  : dispatchChannel === 'sms'
-                  ? `Send Movider SMS Blast to ${targetCount} Recipient(s)`
-                  : `Launch Omnichannel (SMS + WhatsApp) for ${targetCount} Recipient(s)`}
+                  ? 'Dispatching SMS Campaign...'
+                  : `Send Movider SMS Campaign to ${targetCount} Recipient(s)`}
               </span>
             </button>
           </div>
@@ -1834,7 +1741,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                                 : `Current Filtered List (${targets.length})`,
                           });
                         }}
-                        title="Mark these recipients as blasted in Movider WhatsApp so they move to 1+ Sent"
+                        title="Mark these recipients as blasted in Movider so they move to 1+ Sent"
                         className="px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs cursor-pointer transition-all active:scale-95 flex items-center gap-1"
                       >
                         <Zap className="w-3.5 h-3.5 text-amber-500" />
@@ -1847,7 +1754,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                 </div>
               </div>
 
-              {/* Post-Download 1-Click Sync Banner for Movider WhatsApp */}
+              {/* Post-Download 1-Click Sync Banner for Movider Blast */}
               {lastDownloadedBatch && (
                 <div className="p-3.5 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-2 border-emerald-300 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-xs animate-fade-in">
                   <div className="flex items-start sm:items-center gap-2.5">
@@ -1862,7 +1769,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                         </code>
                       </div>
                       <p className="text-emerald-800 text-[11px] mt-0.5">
-                        Once blasted in Movider WhatsApp, click <strong>Sync Blasted Numbers</strong> to immediately update all <strong>{lastDownloadedBatch.count} recipients to 1 Sent</strong> so they are never sent again!
+                        Once blasted in Movider, click <strong>Sync Blasted Numbers</strong> to immediately update all <strong>{lastDownloadedBatch.count} recipients to 1 Sent</strong> so they are never sent again!
                       </p>
                     </div>
                   </div>
@@ -2181,46 +2088,46 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
             <div className="space-y-3">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
-                  <Smartphone className="w-4 h-4 text-emerald-600" />
+                  <Smartphone className="w-4 h-4 text-blue-600" />
                   <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
-                    Live Message Preview
+                    SMS Message Preview
                   </h3>
                 </div>
-                <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-extrabold">
+                <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-800 border border-blue-200 text-[10px] font-extrabold">
                   Real-Time
                 </span>
               </div>
 
-              {/* Smartphone Chat Preview Frame */}
-              <div className="rounded-xl border border-emerald-300 bg-[#e5ddd5] p-3 shadow-inner flex flex-col justify-between overflow-hidden relative min-h-[220px]">
-                {/* WhatsApp Header */}
-                <div className="bg-[#075e54] text-white p-2.5 rounded-t-lg -mx-3 -mt-3 flex items-center justify-between shadow-xs mb-3">
+              {/* Smartphone SMS Preview Frame */}
+              <div className="rounded-2xl border border-slate-300 bg-slate-900 p-3 shadow-md flex flex-col justify-between overflow-hidden relative min-h-[240px]">
+                {/* Mobile Status Header */}
+                <div className="bg-slate-800/90 text-white p-2.5 rounded-xl flex items-center justify-between shadow-xs mb-3 border border-slate-700/80">
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-full bg-emerald-400 text-emerald-950 font-black text-[10px] flex items-center justify-center">
+                    <div className="w-6 h-6 rounded-full bg-blue-600 text-white font-black text-[10px] flex items-center justify-center">
                       WCG
                     </div>
                     <div>
-                      <div className="text-xs font-bold leading-tight">WCGMall Official Store</div>
-                      <div className="text-[9px] text-emerald-200">Online • Verified</div>
+                      <div className="text-xs font-bold leading-tight">WCGMall (SMS)</div>
+                      <div className="text-[9px] text-blue-300">Movider Verified Sender ID</div>
                     </div>
                   </div>
-                  <MessageCircle className="w-4 h-4 text-emerald-300" />
+                  <Smartphone className="w-4 h-4 text-blue-400" />
                 </div>
 
-                {/* Chat Bubble with RM0 WCGMall prefix */}
-                <div className="bg-[#dcf8c6] text-slate-900 p-2.5 rounded-lg rounded-tl-none shadow-xs text-xs space-y-1 self-start max-w-[96%] my-auto relative">
-                  <p className="whitespace-pre-wrap text-[11px] font-sans leading-relaxed text-slate-800">
+                {/* SMS Speech Bubble */}
+                <div className="bg-blue-600 text-white p-3 rounded-2xl rounded-tl-sm shadow-md text-xs space-y-1.5 self-start max-w-[95%] my-auto relative">
+                  <p className="whitespace-pre-wrap text-[11px] font-sans leading-relaxed text-blue-50">
                     {previewMessage}
                   </p>
-                  <div className="flex items-center justify-end gap-1 text-[9px] text-slate-500 font-mono">
-                    <span>12:45 PM</span>
-                    <CheckCheck className="w-3 h-3 text-blue-500" />
+                  <div className="flex items-center justify-between gap-2 text-[9px] text-blue-200 font-mono pt-1 border-t border-blue-500/50">
+                    <span>{charLength} chars • {smsSegments} SMS part(s)</span>
+                    <span>Just now • Delivered</span>
                   </div>
                 </div>
 
                 {/* Recipient Indicator */}
-                <div className="text-[10px] text-emerald-900 font-bold bg-emerald-100/90 px-2 py-0.5 rounded text-center mt-3 border border-emerald-200">
-                  Preview for {previewRecipient.name}
+                <div className="text-[10px] text-slate-300 font-bold bg-slate-800/90 px-2.5 py-1 rounded-lg text-center mt-3 border border-slate-700">
+                  SMS Preview for {previewRecipient.name} ({previewRecipient.phone})
                 </div>
               </div>
             </div>
@@ -2228,19 +2135,19 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
             {/* Campaign Analytics & Cost Summary Box */}
             <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 space-y-2.5 text-xs">
               <div className="text-[11px] font-extrabold text-slate-800 uppercase tracking-wider flex items-center justify-between">
-                <span>Campaign Summary</span>
-                <span className="text-emerald-600 font-extrabold text-[10px] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                  {dispatchChannel === 'sms' ? 'SMS Movider' : dispatchChannel === 'whatsapp' ? 'WhatsApp API' : 'Omnichannel'}
+                <span>SMS Campaign Summary</span>
+                <span className="text-blue-700 font-extrabold text-[10px] bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                  Movider SMS Gateway
                 </span>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-2xs">
-                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Recipients</span>
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Target Recipients</span>
                   <span className="font-extrabold text-slate-900 text-sm">{targetCount} buyers</span>
                 </div>
                 <div className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-2xs">
-                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Est. Cost</span>
+                  <span className="text-slate-400 block text-[10px] font-bold uppercase">Estimated Cost</span>
                   <span className="font-extrabold text-blue-700 text-sm">
                     ~${(targetCount * smsSegments * 0.025).toFixed(2)}
                   </span>
@@ -2249,22 +2156,22 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
 
               <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-200/60 font-medium">
                 <span>Sender ID: <strong className="text-slate-800 font-bold">WCGMall</strong></span>
-                <span>Rate: <strong className="text-slate-800 font-bold">$0.025 / SMS</strong></span>
+                <span>Telco Rate: <strong className="text-slate-800 font-bold">$0.025 / SMS</strong></span>
               </div>
             </div>
           </div>
         )}
       </div>
 
-      {/* Section 2: Interactive 1-Click WhatsApp Direct Chat Queue */}
+      {/* Section 2: Interactive SMS Customer Outreach Queue */}
       <div className="bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
           <div className="flex flex-wrap items-center gap-2">
-            <MessageCircle className="w-4 h-4 text-emerald-600" />
+            <Smartphone className="w-4 h-4 text-blue-600" />
             <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider">
-              1-Click WhatsApp Customer Outreach Queue
+              SMS Customer Outreach Queue
             </h3>
-            <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200">
+            <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-md border border-blue-200">
               {sortedTargetRecipients.length === targetRecipients.length
                 ? `${targetRecipients.length} Reachable Buyers`
                 : `${sortedTargetRecipients.length} of ${targetRecipients.length} Reachable Buyers`}
@@ -2317,14 +2224,14 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                 onClick={() => setWaSentFilter('all')}
                 className={`px-3 py-1 rounded-lg font-bold transition-all flex items-center gap-1.5 cursor-pointer text-xs ${
                   waSentFilter === 'all'
-                    ? 'bg-white text-emerald-700 shadow-2xs border border-emerald-200'
+                    ? 'bg-white text-blue-700 shadow-2xs border border-blue-200'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                 }`}
                 title="Show all reachable buyers regardless of outreach message count"
               >
                 <span>All</span>
                 <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
-                  waSentFilter === 'all' ? 'bg-emerald-100 text-emerald-800 font-extrabold' : 'bg-slate-200 text-slate-600'
+                  waSentFilter === 'all' ? 'bg-blue-100 text-blue-800 font-extrabold' : 'bg-slate-200 text-slate-600'
                 }`}>
                   {waSentStats.all}
                 </span>
@@ -2340,7 +2247,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                 }`}
                 title="Show only buyers with 0 messages sent (Never contacted)"
               >
-                <span>0 Sent (Uncontacted)</span>
+                <span>0 Sent (Never Sent)</span>
                 <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
                   waSentFilter === '0' ? 'bg-blue-100 text-blue-800 font-extrabold' : 'bg-slate-200 text-slate-600'
                 }`}>
@@ -2381,7 +2288,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
             )}
             {waSentFilter === 'all' && (
               <span className="text-slate-400">
-                Showing all {sortedTargetRecipients.length} reachable buyers in outreach queue
+                Showing all {sortedTargetRecipients.length} reachable buyers in SMS outreach queue
               </span>
             )}
           </div>
@@ -2601,15 +2508,29 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                       )}
                     </td>
 
-                    {/* Action */}
+                    {/* Action: Send SMS */}
                     <td className="py-2.5 px-3 text-right whitespace-nowrap">
                       <button
-                        onClick={() => handleLaunchWhatsAppChat(r)}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold inline-flex items-center gap-1.5 ml-auto cursor-pointer shadow-2xs transition-all active:scale-95"
+                        onClick={() => handleSendSingleSms(r)}
+                        disabled={sendingRecipientPhone === r.phone}
+                        className={`px-3 py-1.5 rounded-lg text-white text-[11px] font-bold inline-flex items-center gap-1.5 ml-auto cursor-pointer shadow-2xs transition-all active:scale-95 ${
+                          sendingRecipientPhone === r.phone
+                            ? 'bg-blue-400 cursor-wait'
+                            : 'bg-blue-600 hover:bg-blue-700'
+                        }`}
+                        title={`Dispatch instant SMS to ${r.name}`}
                       >
-                        <MessageCircle className="w-3.5 h-3.5" />
-                        <span>Open WhatsApp</span>
-                        <ExternalLink className="w-3 h-3" />
+                        {sendingRecipientPhone === r.phone ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>Sending...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Send className="w-3.5 h-3.5" />
+                            <span>Send SMS</span>
+                          </>
+                        )}
                       </button>
                     </td>
                   </tr>
@@ -2942,127 +2863,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
         </div>
       )}
 
-      {/* Modal: WhatsApp Outreach Confirmation & Message Note Editor */}
-      {pendingWaConfirmation && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/50 backdrop-blur-xs animate-fadeIn">
-          <div
-            className="w-full max-w-lg rounded-2xl bg-white border border-slate-200 text-slate-900 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header - Clean consistent app style */}
-            <div className="p-4 sm:p-5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div className="w-10 h-10 aspect-square shrink-0 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 font-bold">
-                  <MessageCircle className="w-5 h-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="text-base sm:text-lg font-extrabold text-slate-900 truncate">
-                      Confirm WhatsApp Outreach
-                    </h3>
-                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 uppercase tracking-wider font-mono">
-                      Outreach Verification
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 font-medium">
-                    Did you send the message to this buyer in WhatsApp?
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleCancelWaConfirmation}
-                className="p-2 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 transition-colors cursor-pointer"
-                title="Close modal"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6 overflow-y-auto space-y-5 text-xs sm:text-sm text-slate-700">
-              {/* Recipient Customer Details Card */}
-              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
-                <div className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <User className="w-4 h-4 text-emerald-600" />
-                    Recipient Customer
-                  </span>
-                  <span className="font-mono text-emerald-700 font-bold text-xs bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                    +{pendingWaConfirmation.waPhone}
-                  </span>
-                </div>
-
-                <div className="text-sm sm:text-base font-bold text-slate-900 leading-snug">
-                  {pendingWaConfirmation.recipient.name}
-                  {pendingWaConfirmation.recipient.username && pendingWaConfirmation.recipient.username !== pendingWaConfirmation.recipient.name && (
-                    <span className="text-xs font-mono text-slate-400 font-normal ml-2">
-                      (@{pendingWaConfirmation.recipient.username})
-                    </span>
-                  )}
-                </div>
-
-                {pendingWaConfirmation.recipient.product && (
-                  <div className="text-xs text-slate-600 flex items-center gap-1.5 pt-1 border-t border-slate-200/70">
-                    <ShoppingBag className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span className="font-medium truncate">{pendingWaConfirmation.recipient.product}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Message Content / Custom Note Field */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                    <MessageSquare className="w-4 h-4 text-emerald-600" />
-                    <span>Actual Message Sent / Custom Note</span>
-                  </label>
-                  <span className="text-[11px] text-slate-400 font-medium">Edit if modified in WhatsApp</span>
-                </div>
-                <textarea
-                  rows={4}
-                  value={pendingWaConfirmation.customMessage}
-                  onChange={(e) =>
-                    setPendingWaConfirmation((prev) => (prev ? { ...prev, customMessage: e.target.value } : null))
-                  }
-                  placeholder="Enter the actual message sent or leave default..."
-                  className="w-full p-3.5 rounded-xl border border-slate-200 text-xs sm:text-sm font-medium text-slate-800 focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 bg-white shadow-2xs leading-relaxed"
-                />
-              </div>
-
-              {/* Guidance Notice */}
-              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-xs flex items-start gap-2.5">
-                <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                <span className="leading-relaxed">
-                  Clicking <strong>&ldquo;Yes, Message Sent&rdquo;</strong> will record this outreach in your team history and update the customer&apos;s sent counter. If you closed WhatsApp without sending, click <strong>&ldquo;Not Sent / Cancel&rdquo;</strong>.
-                </span>
-              </div>
-            </div>
-
-            {/* Modal Footer Actions */}
-            <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={handleCancelWaConfirmation}
-                className="px-4 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 font-bold text-xs sm:text-sm transition-colors cursor-pointer"
-              >
-                Not Sent / Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmWaSent}
-                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs sm:text-sm flex items-center gap-2 shadow-xs transition-all active:scale-95 cursor-pointer"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Yes, Message Sent</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Confirmation Modal to Record Movider WhatsApp Blast Batch */}
+      {/* Confirmation Modal to Record Movider Blast Batch */}
       {confirmBlastModal && confirmBlastModal.isOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl border border-slate-200 animate-scale-up space-y-4">
@@ -3072,7 +2873,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
                   <Zap className="w-5 h-5 text-emerald-600" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-slate-900 text-base">Record Movider WhatsApp Blast</h3>
+                  <h3 className="font-extrabold text-slate-900 text-base">Record Movider Campaign Blast</h3>
                   <p className="text-[11px] text-slate-500">Update Outreach History in Database</p>
                 </div>
               </div>
@@ -3087,7 +2888,7 @@ export const SmsMarketingPanel: React.FC<SmsMarketingPanelProps> = ({ orders, us
 
             <div className="space-y-2.5 text-xs text-slate-600 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
               <p className="font-semibold text-slate-800">
-                You are about to record <span className="text-emerald-700 font-extrabold text-sm">{confirmBlastModal.count} recipients</span> from <code className="font-mono text-slate-700 bg-white px-1.5 py-0.5 rounded border border-slate-200">{confirmBlastModal.sourceDescription}</code> as contacted via Movider WhatsApp.
+                You are about to record <span className="text-emerald-700 font-extrabold text-sm">{confirmBlastModal.count} recipients</span> from <code className="font-mono text-slate-700 bg-white px-1.5 py-0.5 rounded border border-slate-200">{confirmBlastModal.sourceDescription}</code> as contacted via Movider.
               </p>
               <ul className="space-y-1.5 text-[11px] text-slate-600 list-disc list-inside">
                 <li>Their outreach status will immediately change from <strong>0 Sent (Never Sent)</strong> to <strong>1 Sent</strong>.</li>

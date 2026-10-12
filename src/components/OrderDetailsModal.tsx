@@ -204,8 +204,10 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onC
                     <div className="space-y-2">
                       {order.items.map((item, idx) => {
                         const itemQty = item.quantity || 1;
-                        const unitPrice = item.retailPrice || (item.paidAmount ? item.paidAmount / itemQty : 0);
-                        const lineTotal = item.paidAmount || (unitPrice * itemQty);
+                        const unitPrice = item.retailPrice || (item.paidAmount && itemQty > 1 && Math.abs(item.paidAmount - (order.totalAmount || 0)) < 0.01 ? item.paidAmount / itemQty : item.paidAmount) || 0;
+                        const lineTotal = (item.paidAmount && item.paidAmount >= (unitPrice * itemQty) && Math.abs(item.paidAmount - unitPrice) > 0.01)
+                          ? item.paidAmount
+                          : (unitPrice > 0 ? unitPrice * itemQty : (item.paidAmount || 0) * itemQty);
 
                         return (
                           <div key={idx} className="p-2.5 rounded-lg bg-white border border-blue-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
@@ -231,9 +233,12 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onC
                               {item.discount && item.discount > 0 ? (
                                 <span className="text-slate-500 line-through text-[11px]">RM {(unitPrice * itemQty).toFixed(2)}</span>
                               ) : null}
-                              <span className="font-mono font-black text-slate-900 bg-slate-100 px-2.5 py-1 rounded border border-slate-200">
-                                {maskPrice(lineTotal, userRole, (v) => `RM ${v.toFixed(2)}`)}
-                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] font-extrabold uppercase text-slate-500">Total:</span>
+                                <span className="font-mono font-black text-slate-900 bg-slate-100 px-2.5 py-1 rounded border border-slate-200">
+                                  {maskPrice(lineTotal, userRole, (v) => `RM ${v.toFixed(2)}`)}
+                                </span>
+                              </div>
                               <span className="px-2.5 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 font-extrabold text-xs">
                                 Qty: {itemQty}
                               </span>
@@ -488,9 +493,7 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onC
 
           {/* Financial Escrow Breakdown */}
           {(() => {
-            const merchandiseSubtotal = (order.costOfGoodsSold && order.costOfGoodsSold > 0)
-              ? order.costOfGoodsSold
-              : (order.totalAmount || 0);
+            const merchandiseSubtotal = getMerchandiseGmv(order);
             const commissionFee = order.commissionFee || 0;
             const transactionFee = order.transactionFee || 0;
             const adsEscrowFee = order.adsEscrowFee || 0;

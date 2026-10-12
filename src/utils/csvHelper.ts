@@ -10,6 +10,17 @@ export function isCancelledOrder(order: Partial<ShopeeOrder> | undefined | null)
 
 export function getMerchandiseGmv(order: Partial<ShopeeOrder>): number {
   if (!order || isCancelledOrder(order)) return 0;
+  if (order.items && order.items.length > 0) {
+    const itemsTotal = order.items.reduce((sum, it) => {
+      const q = it.quantity || 1;
+      const unitP = it.paidAmount || it.retailPrice || 0;
+      return sum + (unitP * q);
+    }, 0);
+    const existing = (order.costOfGoodsSold && order.costOfGoodsSold > 0) ? order.costOfGoodsSold : (order.totalAmount || 0);
+    if (itemsTotal > 0 && (existing <= 0 || (itemsTotal > existing && (order.quantity || 1) > 1))) {
+      return itemsTotal;
+    }
+  }
   if (order.costOfGoodsSold && order.costOfGoodsSold > 0) {
     return order.costOfGoodsSold;
   }
@@ -52,9 +63,7 @@ export function formatMalaysiaTime(dateStr: string | undefined | null): string {
 export function calculateNetIncome(order: Partial<ShopeeOrder>): number {
   if (!order) return 0;
 
-  const merchandise = (order.costOfGoodsSold && order.costOfGoodsSold > 0)
-    ? order.costOfGoodsSold
-    : (order.totalAmount || 0);
+  const merchandise = getMerchandiseGmv(order);
 
   const comm = order.commissionFee || 0;
   const trans = order.transactionFee || 0;
@@ -637,7 +646,18 @@ export function parseParsedObjects(rows: any[], rawHeaders: string[] = []): { or
     }
     
     const productName = rawProductName || 'Digital Asset Top-Up';
-    const rawTotalAmount = getVal(['paidprice', 'paid_price', 'unitprice', 'unit_price', 'grandtotal', 'totalamount', 'total_amount', 'jumlahkeseluruhan', 'jumlah_keseluruhan', 'totalprice', 'total_price', 'total', 'amount', 'price', 'paidamount', 'orderamount', 'dealprice', 'productsubtotal', 'jumlahpembayaran', 'jumlah', '订单总金额']) || '0.00';
+
+    // 1. Explicitly parse unit / item prices (per item amount)
+    const rawUnitPrice = getVal(['unitprice', 'unit_price', 'dealprice', 'deal_price', 'price', 'itemprice', 'productprice', 'originalprice', 'hargaasal', 'hargatawaran', 'hargaseunit']);
+    const parsedUnitPrice = parseFloat(rawUnitPrice.replace(/[^0-9.-]/g, '')) || 0;
+
+    // 2. Parse true order grand total / total amount prioritizing grand total columns
+    const rawTotalAmount = getVal([
+      'grandtotal', 'grand_total', 'totalamount', 'total_amount', 'jumlahkeseluruhan', 'jumlah_keseluruhan',
+      'totalprice', 'total_price', 'ordertotal', 'order_total', 'totalreleasedamount', 'jumlahpembayaran',
+      'jumlah_pembayaran', 'paidamount', 'paid_amount', 'productsubtotal', 'subtotal', 'total', 'amount', '订单总金额'
+    ]) || '';
+
     const orderStatus = getVal(['orderstatus', 'order_status', 'statuspesanan', 'status_pesanan', 'status', 'state', '订单状态']) || 'Completed';
     const rawOrderDate = getVal(['createdtime', 'created_time', 'ordercreationdate', 'creationdate', 'creation_date', 'orderpaidtime', 'paidtime', 'orderdate', 'order_date', 'masapesanandibuat', 'masa_pesanan_dibuat', 'createddate', 'time', 'ordertime', 'tarikhpesanan', 'masadibuat', '下单时间', 'created_at']) || '';
     const rawShipTime = getVal(['shiptime', 'ship_time', 'shippedtime', 'shipped_time', 'ordershiptime', 'order_ship_time', 'shipmenttime', 'shipment_time', 'pickuptime', 'pickup_date', 'masadihantar', 'masa_dihantar', 'tarikhdihantar', 'ship_date', 'shippingtime', 'shipping_time', '发货时间', 'parcelhasbeenpickedup']) || '';
@@ -652,21 +672,34 @@ export function parseParsedObjects(rows: any[], rawHeaders: string[] = []): { or
     const voucherCode = getVal(['vouchercode', 'voucher', 'discountcode', 'kodbaucer']) || '';
     const skuRef = getVal(['skureferenceno', 'skuref', 'sku_ref', 'norujukansku', 'no_rujukan_sku', 'skureference', 'sku', 'code', 'variationsku', 'parentsku', 'rujukansku', '商品编码']) || getVal(['variationname']);
 
-    // Parse numeric amount
-    const cleanNum = rawTotalAmount.replace(/[^0-9.-]/g, '');
-    const totalAmount = parseFloat(cleanNum) || 0;
     const quantity = parseInt(quantityStr.replace(/[^0-9]/g, ''), 10) || 1;
+    let totalAmount = parseFloat(rawTotalAmount.replace(/[^0-9.-]/g, '')) || 0;
+
+    // If totalAmount was missing or equal to single unit price when quantity > 1, compute unitPrice * quantity
+    if (parsedUnitPrice > 0 && quantity > 1) {
+      if (totalAmount === 0 || totalAmount <= parsedUnitPrice) {
+        totalAmount = parsedUnitPrice * quantity;
+      }
+    } else if (totalAmount === 0 && parsedUnitPrice > 0) {
+      totalAmount = parsedUnitPrice * quantity;
+    }
 
     // Financial fee parsing
-    const cogsParsed = getVal(['costofgoodssold', 'cost_of_goods_sold', 'merchandisesubtotal', 'originalprice', 'productsubtotal', 'subtotal', 'productprice', 'hargaasal', 'subtotalproduk']);
+    const cogsParsed = getVal(['costofgoodssold', 'cost_of_goods_sold', 'merchandisesubtotal', 'productsubtotal', 'subtotalproduk']);
+    let costOfGoodsSold = cogsParsed ? parseFloat(cogsParsed.replace(/[^0-9.-]/g, '')) : totalAmount;
+    if (parsedUnitPrice > 0 && quantity > 1 && costOfGoodsSold <= parsedUnitPrice) {
+      costOfGoodsSold = parsedUnitPrice * quantity;
+    }
+    if (costOfGoodsSold <= 0) {
+      costOfGoodsSold = totalAmount;
+    }
     const voucherParsed = getVal(['vouchersrebates', 'vouchersandrebates', 'vouchers_rebates', 'vouchers', 'shopvoucherpaidbyseller', 'sellervoucher', 'seller_voucher_discount', 'voucherdiscount', 'shopvoucher', 'sellerdiscount', 'rebate', 'baucerpenjual', 'diskaunbaucer']);
     const commFeeParsed = getVal(['commissionfee', 'commission_fee', 'commission', 'shopeecommissionfee', 'yurankomisen', 'komisen']);
     const transFeeParsed = getVal(['transactionfee', 'transaction_fee', 'seller_transaction_fee', 'sellerfee', 'sellertransactionfee', 'yurantransaksi']);
-    const adsFeeParsed = getVal(['adsescrowfee', 'ads_escrow_top_up_fee_or_technical_support_fee', 'ads_escrow_fee', 'adsescrowtopupfee', 'technicalsupportfee', 'adsescrowtopupfeeortechnicalsupportfee', 'yurantopupadsescrow', 'yuranadsescrow', 'adsfee', 'yuraniklan', 'adsservicefee', 'adsescrowtopup', 'adstopupfee', 'ads']);
+    const adsFeeParsed = getVal(['adsescrowfee', 'ads_escrow_top_up_fee_or_technical_support_fee', 'ads_escrow_fee', 'adsescrowtopupfee', 'technicalsupportfee', 'adsescrowtopupfeeortechnicalsupportfee', 'yurantopupadsescrow', 'yuranadsescrow', 'adsfee', 'yuraniklan', 'adsservicefee', 'adsescrowtopupfee', 'ads']);
     const svcFeeParsed = getVal(['servicefee', 'service_fee', 'shopeeservicefee', 'yuranperkhidmatan']);
     const escrowAmtParsed = getVal(['escrowamount', 'escrow_amount', 'netincome', 'estimatedincome', 'orderincome', 'finalizedincome', 'totalpayout', 'estimatedorderincome', 'anggaranpendapatanpesanan']);
 
-    const costOfGoodsSold = cogsParsed ? parseFloat(cogsParsed.replace(/[^0-9.-]/g, '')) : totalAmount;
     const sellerVoucherDiscount = voucherParsed ? Math.abs(parseFloat(voucherParsed.replace(/[^0-9.-]/g, ''))) || 0 : 0;
     const commissionFee = commFeeParsed ? parseFloat(commFeeParsed.replace(/[^0-9.-]/g, '')) : 0;
     let transactionFee = transFeeParsed ? parseFloat(transFeeParsed.replace(/[^0-9.-]/g, '')) : 0;
@@ -704,8 +737,8 @@ export function parseParsedObjects(rows: any[], rawHeaders: string[] = []): { or
 
     // Extract item level variation / SKU details for multi-item breakdown
     const variation = getVal(['variation', 'variation3', 'variation_name', 'variant', 'skuname', 'sku_name', 'options', 'variationsku']);
-    const itemRetailPrice = parseFloat(getVal(['retailprice', 'retail_price', 'unitprice', 'unit_price', 'originalprice'])) || totalAmount || 0;
-    const itemPaidPrice = parseFloat(getVal(['paidprice', 'paid_price', 'paidamount', 'dealprice'])) || totalAmount || 0;
+    const itemRetailPrice = parseFloat(getVal(['retailprice', 'retail_price', 'originalprice'])) || parsedUnitPrice || (totalAmount / quantity) || 0;
+    const itemPaidPrice = parseFloat(getVal(['paidprice', 'paid_price', 'paidamount', 'dealprice'])) || parsedUnitPrice || (totalAmount / quantity) || 0;
     const itemDiscount = parseFloat(getVal(['discount', 'sellerdiscount', 'seller_discount', 'sellerdiscounttotal', 'promotions'])) || sellerVoucherDiscount || 0;
     const itemSku = getVal(['sellersku', 'seller_sku', 'sku', 'skuref', 'itemid', 'item_id']) || skuRef;
 

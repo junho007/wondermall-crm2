@@ -176,16 +176,16 @@ export const StatsOverview: React.FC<StatsOverviewProps> = ({
           </p>
         </div>
 
-        {/* 5. SMS & WhatsApp Gateway Service Card */}
+        {/* 5. SMS Marketing Gateway (Movider) */}
         <div
           onClick={onOpenSmsTab}
-          className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 hover:border-emerald-400 transition-all cursor-pointer group col-span-1 sm:col-span-2 lg:col-span-1"
+          className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 hover:border-blue-400 transition-all cursor-pointer group col-span-1 sm:col-span-2 lg:col-span-1"
         >
           <div className="flex items-center justify-between">
             <span className="text-[10px] uppercase tracking-wider font-bold text-slate-500">
-              SMS &amp; WhatsApp Gateway
+              SMS Gateway (Movider)
             </span>
-            <div className="w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600 group-hover:scale-110 transition-transform">
+            <div className="w-8 h-8 rounded-lg bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600 group-hover:scale-110 transition-transform">
               <MessageSquare className="w-4 h-4" />
             </div>
           </div>

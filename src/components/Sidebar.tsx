@@ -79,9 +79,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'sms' as ActiveTab,
-      label: 'SMS & WhatsApp Marketing',
+      label: 'SMS Marketing Hub',
       icon: MessageSquare,
-      badge: 'HOT',
+      badge: 'SMS',
     },
     {
       id: 'settings' as ActiveTab,

@@ -392,10 +392,27 @@ function formatShopeeEpochToMytString(epochSeconds) {
         };
       });
 
+      const itemsGmv = mappedItems.reduce((sum, it) => {
+        const p = it.model_discounted_price != null ? it.model_discounted_price : (it.model_original_price != null ? it.model_original_price : 0);
+        return sum + (p * (it.quantity || 1));
+      }, 0);
+
+      let finalOrderTotal = order.total_amount ? Number(order.total_amount) : 0;
+      if (itemsGmv > 0 && (finalOrderTotal === 0 || (finalOrderTotal < itemsGmv && totalPurchasedQty > 1))) {
+        finalOrderTotal = itemsGmv;
+      }
+
+      let cogs = escrow.cost_of_goods_sold ?? escrow.original_price ?? null;
+      if (cogs != null && itemsGmv > 0 && Number(cogs) < itemsGmv && totalPurchasedQty > 1) {
+        cogs = itemsGmv.toFixed(2);
+      } else if (cogs == null && itemsGmv > 0) {
+        cogs = itemsGmv.toFixed(2);
+      }
+
       return {
         order_sn: sn,
         order_status: order.order_status || 'READY_TO_SHIP',
-        total_amount: order.total_amount ? Number(order.total_amount).toFixed(2) : '0.00',
+        total_amount: finalOrderTotal > 0 ? finalOrderTotal.toFixed(2) : (order.total_amount ? Number(order.total_amount).toFixed(2) : '0.00'),
         currency: order.currency || 'MYR',
         buyer_username: order.buyer_username || `Buyer_${order.buyer_user_id || 'Shopee'}`,
         item_count: totalPurchasedQty,
@@ -406,8 +423,8 @@ function formatShopeeEpochToMytString(epochSeconds) {
         pay_time: formatShopeeEpochToMytString(payOrCreateTime),
         ship_time: order.ship_time ? formatShopeeEpochToMytString(order.ship_time) : null,
         delivery_time: (order.order_status === 'COMPLETED' && order.update_time) ? formatShopeeEpochToMytString(order.update_time) : null,
-        original_price: escrow.original_price ?? escrow.cost_of_goods_sold ?? null,
-        cost_of_goods_sold: escrow.cost_of_goods_sold ?? escrow.original_price ?? null,
+        original_price: cogs,
+        cost_of_goods_sold: cogs,
         seller_voucher_discount: escrow.seller_voucher_discount ?? '0.00',
         voucher_code: escrow.voucher_code ?? order.voucher_code ?? null,
         commission_fee: escrow.commission_fee ?? null,
